@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [ "main" ]   # Falls dein Haupt-Branch anders heißt, hier anpassen
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:
@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: "pages"
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -21,32 +21,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Use Node.js
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          # kein cache: wir haben kein lockfile
 
-      - name: Install deps
+      # Wichtig: kein "npm ci", damit kein Lockfile nötig ist
+      - name: Install dependencies
         run: npm install
 
       - name: Build
+        env:
+          # Vite erfährt so den Repo-Namen (wird in vite.config.js genutzt)
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: npm run build
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./dist   # Vite-Build-Ordner
+          path: dist
 
   deploy:
+    needs: build
+    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
