@@ -183,8 +183,8 @@ const JPG_QUALITY_ATTACH = 0.72;// Anhänge
 
 // Logo (liegt in /public/logo.png)
 const LOGO_SRC = "logo.png";
-const LOGO_W = 90;  // pt
-const LOGO_H = 28;  // pt
+const LOGO_W = 270;  // pt
+const LOGO_H = 84;  // pt
 
 async function downscaleImage(dataUrl, targetWidthPx = TARGET_IMG_PX, quality = JPG_QUALITY_ATTACH) {
   return new Promise((resolve) => {
