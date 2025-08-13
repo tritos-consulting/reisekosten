@@ -12,7 +12,7 @@ import html2canvas from "html2canvas";
  * - pdf.js-Lader (zuerst lokal /public/pdfjs, dann CDN-Fallback)
  * - Logo nur auf erster PDF-Seite (rechtsbündig, LOGO_RIGHT justierbar)
  * - Einheitliche, rechtsbündige Betragsspalten in allen Tabellen
- * - „📧 E-Mail “-Button (Light-Variante, mailto:)
+ * - „📧 Email “-Button (Light-Variante, mailto:)
  */
 
 // --------- Design Tokens ----------
@@ -627,9 +627,9 @@ export default function TravelExpenseFormDE() {
               )}&body=${encodeURIComponent("Bitte die PDF-Reisekostenabrechnung im Anhang einfügen.")}`;
               window.location.href = mailtoLink;
             }}
-            title="E-Mail mit Betreff erstellen"
+            title="Enail mit Betreff erstellen"
           >
-            📧 E-Mail
+            📧 Email
           </Button>
         </div>
       </div>
@@ -967,7 +967,7 @@ export default function TravelExpenseFormDE() {
                   window.location.href = mailtoLink;
                 }}
               >
-                📧 E-Mail 
+                📧 Email 
               </Button>
               {pdfUrl && (
                 <>
