@@ -2,16 +2,38 @@
 <html lang="de">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
     <title>Reisekostenabrechnung</title>
 
     <!-- Inter Schrift einbinden -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- pdf.js stabil vorab laden (verhindert Laufzeit-Probleme beim Rendern von PDF-Anhängen) -->
+    <script
+      src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.js"
+      crossorigin="anonymous"
+    ></script>
+    <script>
+      // Worker setzen, sobald pdf.js verfügbar ist
+      if (window.pdfjsLib) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+          "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.js";
+      }
+    </script>
   </head>
+
   <body style="margin:0;background:#f8fafc">
     <div id="root"></div>
+
+    <!-- Vite-Entry: bleibt /src/main.jsx (Vite kümmert sich beim Build um Pfade, base ist in vite.config.* gesetzt) -->
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
