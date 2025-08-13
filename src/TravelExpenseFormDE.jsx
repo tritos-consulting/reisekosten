@@ -1,3 +1,4 @@
+// src/TravelExpenseFormDE.jsx
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
@@ -5,11 +6,14 @@ import html2canvas from "html2canvas";
 /**
  * Features:
  * - 0,30 €/km (keine Staffel), KM aus Tachostand
- * - Responsive Layout, größere Seitenränder/Spaltengaps
- * - Upload: Bilder & PDFs, Entfernen-Button pro Beleg (Overlay)
- * - PDF-Export komprimiert (JPEG) + Anhänge
- * - Robustes pdf.js Laden (mehrere CDNs + Fallback, kein harter Abbruch)
- * - PDF enthält: Fahrtkosten, Verpflegung, Übernachtung, Sonstige Auslagen
+ * - Responsive Layout, großzügige Abstände
+ * - Upload: Bilder & PDFs (Datei-Dialog + Drag&Drop), Entfernen-Button pro Beleg
+ * - PDF-Export:
+ *    - Formular als komprimiertes JPEG
+ *    - Anhänge: 1 Seite pro Bild/PDF-Seite, automatisch Portrait/Landscape, A4
+ *    - Runterskalieren & JPEG-Qualität für kleine Dateigröße
+ * - pdf.js: lokal (public/pdfjs/*) mit CDN-Fallback
+ * - PDF enthält: Fahrtkosten, Verpflegung, Übernachtung, Auslagen
  */
 
 // --------- Design Tokens ----------
@@ -117,7 +121,7 @@ const Input = ({ style, ...props }) => (
     {...props}
     style={{
       width: "100%",
-      height: 36,
+      height: 34,
       padding: "6px 8px",
       borderRadius: TOKENS.radius,
       border: `1px solid ${TOKENS.border}`,
@@ -177,15 +181,40 @@ function kmFlatCost(km, rate = 0.30) {
   return k * rate;
 }
 
-// --------- pdf.js Loader: zuerst LOKAL, dann (optional) CDNs ---------
-const PDFJS_VERSION = "3.11.174"; // entspricht deinen hochgeladenen Dateien
-const PDFJS_CANDIDATES = [
-  // 1) Lokale Bundles (public/pdfjs/*)
-  { lib: "pdfjs/pdf.min.js", worker: "pdfjs/pdf.worker.min.js" },
+// --- PDF/A4 Konstanten & Kompression ---
+const A4 = { wPt: 595.28, hPt: 841.89 }; // A4 in pt (jsPDF)
+const TARGET_IMG_PX = 1360;               // Zielbreite zum Downscaling
+const JPG_QUALITY_MAIN = 0.78;            // Formular-Screenshot
+const JPG_QUALITY_ATTACH = 0.72;          // Anhänge
 
-  // 2) Optionale Fallbacks (nur falls lokal wirklich nicht verfügbar)
-  { lib: `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/build/pdf.min.js`,
-    worker: `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.js` },
+async function downscaleImage(dataUrl, targetWidthPx = TARGET_IMG_PX, quality = JPG_QUALITY_ATTACH) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, targetWidthPx / img.width);
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.src = dataUrl;
+  });
+}
+
+// --------- pdf.js Loader: zuerst LOKAL, dann (optional) CDN ---------
+const PDFJS_VERSION = "3.11.174";
+const PDFJS_CANDIDATES = [
+  { lib: "pdfjs/pdf.min.js", worker: "pdfjs/pdf.worker.min.js" },
+  {
+    lib: `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/build/pdf.min.js`,
+    worker: `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.js`,
+  },
 ];
 
 function loadScript(src) {
@@ -201,26 +230,21 @@ function loadScript(src) {
 }
 
 async function ensurePdfJs() {
-  // Wenn pdf.js bereits durch index.html geladen wurde, direkt nutzen
   if (window.pdfjsLib) {
     if (!window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
-      // Sicherheitshalber den lokalen Worker setzen
       window.pdfjsLib.GlobalWorkerOptions.workerSrc = "pdfjs/pdf.worker.min.js";
     }
     return window.pdfjsLib;
   }
-
-  // Sonst Kandidaten durchprobieren (lokal zuerst)
   let lastErr;
-  for (const cdn of PDFJS_CANDIDATES) {
+  for (const c of PDFJS_CANDIDATES) {
     try {
-      await loadScript(cdn.lib);
+      await loadScript(c.lib);
       if (!window.pdfjsLib) throw new Error("pdfjsLib global missing");
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc = cdn.worker;
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = c.worker;
       return window.pdfjsLib;
     } catch (e) {
       lastErr = e;
-      // weiter mit nächstem Kandidaten
     }
   }
   throw new Error(lastErr?.message || "pdf.js konnte nicht geladen werden.");
@@ -273,6 +297,10 @@ export default function TravelExpenseFormDE() {
   const [testOutput, setTestOutput] = useState([]);
   const printableRef = useRef(null);
 
+  // Drag & Drop UI
+  const [isDragging, setIsDragging] = useState(false);
+  const dropRef = useRef(null);
+
   // ---------- Effects ----------
   useEffect(() => {
     if (basis.kwAuto && basis.beginn) {
@@ -303,8 +331,8 @@ export default function TravelExpenseFormDE() {
   const addAuslage = () => setAuslagen((a) => [...a, { id: Date.now(), text: "", betrag: "" }]);
   const delAuslage = (id) => setAuslagen((a) => a.filter((x) => x.id !== id));
 
-  const handleFileUpload = async (e) => {
-    const files = Array.from(e.target.files || []);
+  const handleFiles = async (filesList) => {
+    const files = Array.from(filesList || []);
     const next = [];
     for (const file of files) {
       if (file.type.startsWith("image/")) {
@@ -319,25 +347,65 @@ export default function TravelExpenseFormDE() {
       }
     }
     if (next.length) setAttachments((prev) => [...prev, ...next]);
+  };
+
+  const handleFileInputChange = async (e) => {
+    await handleFiles(e.target.files);
     e.target.value = "";
   };
+
   const removeAttachment = (idx) => setAttachments((prev) => prev.filter((_, i) => i !== idx));
+
+  // Drag & Drop handlers
+  const onDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+  const onDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // nur zurücksetzen, wenn wir wirklich die Dropzone verlassen
+    if (dropRef.current && !dropRef.current.contains(e.relatedTarget)) {
+      setIsDragging(false);
+    }
+  };
+  const onDrop = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    if (e.dataTransfer?.files?.length) {
+      await handleFiles(e.dataTransfer.files);
+    }
+  };
 
   async function renderPdfFileToImages(file) {
     const pdfjsLib = await ensurePdfJs();
     const ab = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
     const pages = [];
+
     for (let p = 1; p <= pdf.numPages; p++) {
       const page = await pdf.getPage(p);
-      const viewport = page.getViewport({ scale: 1.5 });
+
+      // Zielbreite in Pixel -> Höhe über Seitenverhältnis
+      const vp1 = page.getViewport({ scale: 1 });
+      const aspect = vp1.height / vp1.width;
+      const targetW = TARGET_IMG_PX;
+      const targetH = Math.round(targetW * aspect);
+
       const canvas = document.createElement("canvas");
       const ctx = canvas.getContext("2d");
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      await page.render({ canvasContext: ctx, viewport }).promise;
-      const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
-      pages.push({ dataUrl });
+      canvas.width = targetW;
+      canvas.height = targetH;
+
+      const scale = targetW / vp1.width;
+      const viewport = page.getViewport({ scale });
+
+      await page.render({ canvasContext: ctx, viewport, intent: "print" }).promise;
+
+      const dataUrl = canvas.toDataURL("image/jpeg", JPG_QUALITY_ATTACH);
+      pages.push({ dataUrl, aspect });
     }
     return pages;
   }
@@ -350,6 +418,7 @@ export default function TravelExpenseFormDE() {
       if (!node) return;
       setBusy(true);
 
+      // Temporär offscreen rendern
       const prev = {
         position: node.style.position,
         left: node.style.left,
@@ -363,84 +432,100 @@ export default function TravelExpenseFormDE() {
       node.style.opacity = "1";
       node.style.pointerEvents = "none";
 
+      // Hauptformular als JPEG (komprimiert)
       const canvas = await html2canvas(node, {
-        scale: 1.5,
+        scale: 1.3,
         useCORS: true,
         backgroundColor: "#ffffff",
+        imageTimeout: 15000,
       });
 
       Object.assign(node.style, prev);
 
       const pdf = new jsPDF({ unit: "pt", format: "a4", compress: true });
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
 
+      // Hauptseite einpassen (A4 mit Rand)
+      const pageW = pdf.internal.pageSize.getWidth();   // ~595
+      const pageH = pdf.internal.pageSize.getHeight();  // ~842
       const margin = 24;
-      const innerW = pageWidth - margin * 2;
-      const innerH = pageHeight - margin * 2;
+      const innerW = pageW - margin * 2;
+      const innerH = pageH - margin * 2;
       const ratio = Math.min(innerW / canvas.width, innerH / canvas.height);
       const w = canvas.width * ratio;
       const h = canvas.height * ratio;
+      const imgMain = canvas.toDataURL("image/jpeg", JPG_QUALITY_MAIN);
+      pdf.addImage(imgMain, "JPEG", (pageW - w) / 2, margin, w, h, undefined, "FAST");
 
-      const imgData = canvas.toDataURL("image/jpeg", 0.85);
-      pdf.addImage(imgData, "JPEG", (pageWidth - w) / 2, margin, w, h);
-
-      // Anhänge sammeln (mit sanftem Fallback)
+      // ---- Anhänge (A4, 1 pro Seite, Orientierung je Seite) ----
       const allImages = [];
-let pdfRenderFailed = false;
+      let pdfRenderFailed = false;
 
-// (optional) versucht pdf.js einmal vorzubereiten, ignoriert Fehler
-try { await ensurePdfJs(); } catch { /* ignorieren – wir probieren es einfach beim ersten PDF */ }
-
-for (const att of attachments) {
-  if (att.kind === "image") {
-    allImages.push({ dataUrl: att.dataUrl, name: att.name });
-  } else if (att.kind === "pdf") {
-    try {
-      const imgs = await renderPdfFileToImages(att.file);
-      imgs.forEach((img, i) =>
-        allImages.push({ dataUrl: img.dataUrl, name: `${att.name} (Seite ${i + 1})` })
-      );
-    } catch {
-      pdfRenderFailed = true;
-    }
-  }
-}
-
-      if (allImages.length) {
-        const title = (txt) => {
-          pdf.setFontSize(12);
-          pdf.text(txt, margin, margin + 6);
-        };
-        pdf.addPage();
-        title("Anhänge");
-        let y = margin + 16;
-        const maxW = pageWidth - margin * 2;
-        const maxH = (pageHeight - margin * 2 - 18) / 2; // 2 pro Seite
-
-        for (let i = 0; i < allImages.length; i++) {
-          const img = allImages[i];
-          const dim = await new Promise((resolve) => {
-            const image = new Image();
-            image.onload = () => resolve({ w: image.width, h: image.height });
-            image.src = img.dataUrl;
-          });
-          const scale = Math.min(maxW / dim.w, maxH / dim.h);
-          const iw = dim.w * scale;
-          const ih = dim.h * scale;
-          pdf.addImage(img.dataUrl, "JPEG", (pageWidth - iw) / 2, y, iw, ih);
-          y += ih + 12;
-          pdf.setFontSize(9);
-          pdf.text(img.name || "Anhang", margin, y - 4);
-
-          if (i % 2 === 1 && i < allImages.length - 1) {
-            pdf.addPage();
-            title("Anhänge (Fortsetzung)");
-            y = margin + 16;
+      // 1) Bilder vorbereiten (runterskalieren + komprimieren)
+      for (const att of attachments) {
+        if (att.kind === "image") {
+          try {
+            const dataUrl = await downscaleImage(att.dataUrl, TARGET_IMG_PX, JPG_QUALITY_ATTACH);
+            allImages.push({ dataUrl, name: att.name });
+          } catch (e) {
+            console.error("Bildanhang konnte nicht verarbeitet werden:", att.name, e);
           }
         }
       }
 
+      // 2) PDFs rendern -> JPEG-Seiten (komprimiert)
+      for (const att of attachments) {
+        if (att.kind === "pdf") {
+          try {
+            const imgs = await renderPdfFileToImages(att.file); // [{dataUrl, aspect}]
+            imgs.forEach((img, i) => {
+              allImages.push({ dataUrl: img.dataUrl, name: `${att.name} (Seite ${i + 1})`, aspect: img.aspect });
+            });
+          } catch (err) {
+            console.error("PDF-Render-Fehler bei", att.name, err);
+            pdfRenderFailed = true;
+          }
+        }
+      }
+
+      // 3) Einfügen: je Bild eine A4-Seite, Orientierung passend
+      for (let i = 0; i < allImages.length; i++) {
+        const { dataUrl, name } = allImages[i];
+
+        // Bildmaße ermitteln (für Orientierung & Fit)
+        const dim = await new Promise((resolve) => {
+          const image = new Image();
+          image.onload = () => resolve({ w: image.width, h: image.height });
+          image.src = dataUrl;
+        });
+
+        const imgRatio = dim.h / dim.w;
+        const isLandscape = imgRatio < 1; // breiter als hoch?
+
+        // neue Seite hinzufügen (erste ist schon belegt)
+        pdf.addPage("a4", isLandscape ? "landscape" : "portrait");
+
+        const curW = pdf.internal.pageSize.getWidth();
+        const curH = pdf.internal.pageSize.getHeight();
+
+        // Rand und maximal einpassen
+        const m = 20;
+        const maxW = curW - m * 2;
+        const maxH = curH - m * 2;
+        const scale = Math.min(maxW / dim.w, maxH / dim.h);
+        const drawW = dim.w * scale;
+        const drawH = dim.h * scale;
+
+        const x = (curW - drawW) / 2;
+        const y = (curH - drawH) / 2;
+
+        pdf.addImage(dataUrl, "JPEG", x, y, drawW, drawH, undefined, "FAST");
+
+        // kleine Beschriftung unten links (optional)
+        pdf.setFontSize(9);
+        pdf.text(name || "Anhang", m, curH - m / 2);
+      }
+
+      // Download + Preview
       const filename = `Reisekosten_${basis.name || "Mitarbeiter"}_KW${(basis.kw || "XX").replace("/", "-")}.pdf`;
       try {
         pdf.save(filename, { returnPromise: true });
@@ -449,15 +534,12 @@ for (const att of attachments) {
       const url = URL.createObjectURL(blob);
       setPdfUrl(url);
 
-// Hinweis statt Fehler – nur anzeigen, wenn beim Rendern wirklich etwas schiefging
-if (pdfRenderFailed) {
-  setErrMsg(
-    "Hinweis: Mindestens ein PDF-Anhang konnte nicht gerendert werden. Bilder wurden dennoch exportiert."
-  );
-} else {
-  // Falls vorher ein alter Hinweis stand, jetzt zurücksetzen
-  setErrMsg("");
-}
+      // Nur wenn beim Rendern von PDF-Anhängen etwas scheiterte: Hinweis
+      if (pdfRenderFailed) {
+        setErrMsg("Hinweis: Mindestens ein PDF-Anhang konnte nicht gerendert werden. Bilder wurden dennoch exportiert.");
+      } else {
+        setErrMsg("");
+      }
 
       setBusy(false);
     } catch (err) {
@@ -486,7 +568,7 @@ if (pdfRenderFailed) {
     }
   };
 
-  // ---------- Responsive Grids ----------
+  // ---------- Responsive helpers ----------
   const containerPadding = isDesktop(width) ? 40 : isTablet(width) ? 28 : 20;
   const colGap = isDesktop(width) ? 28 : isTablet(width) ? 24 : 20;
   const cols = (desktop, tablet, mobile) =>
@@ -721,15 +803,45 @@ if (pdfRenderFailed) {
         </CardContent>
       </Card>
 
-      {/* Belege */}
+      {/* Belege (Upload + Drag&Drop) */}
       <div style={{ height: 18 }} />
       <Card>
         <CardHeader><CardTitle>Belege hochladen</CardTitle></CardHeader>
         <CardContent>
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <Input id="file" type="file" multiple accept="image/*,application/pdf" onChange={handleFileUpload} style={{ maxWidth: 480 }} />
-            <div style={{ fontSize: 12, color: TOKENS.textMut }}>Bilder & PDFs werden komprimiert in der Export-PDF angehängt.</div>
+            <Input
+              id="file"
+              type="file"
+              multiple
+              accept="image/*,application/pdf"
+              onChange={handleFileInputChange}
+              style={{ maxWidth: 480 }}
+            />
+            <div style={{ fontSize: 12, color: TOKENS.textMut }}>
+              Bilder & PDFs werden komprimiert und jeweils seitenfüllend auf DIN A4 angehängt.
+            </div>
           </div>
+
+          {/* Drag & Drop Zone */}
+          <div
+            ref={dropRef}
+            onDragOver={onDragOver}
+            onDragLeave={onDragLeave}
+            onDrop={onDrop}
+            style={{
+              marginTop: 8,
+              border: `2px dashed ${isDragging ? TOKENS.focus : TOKENS.border}`,
+              background: isDragging ? "rgba(37,99,235,0.06)" : "#fff",
+              borderRadius: TOKENS.radius,
+              padding: 20,
+              textAlign: "center",
+              color: TOKENS.textDim,
+              transition: "all .15s ease",
+            }}
+          >
+            {isDragging ? "Dateien hierher loslassen…" : "…oder Dateien hierher ziehen und ablegen (Bilder, PDFs)"}
+          </div>
+
           {attachments.length > 0 && (
             <div style={{ display: "grid", gridTemplateColumns: cols(4, 3, 2), columnGap: colGap, rowGap: 24 }}>
               {attachments.map((att, i) => (
@@ -749,7 +861,7 @@ if (pdfRenderFailed) {
                     background: "#fff",
                   }}
                 >
-                  {/* Entfernen-Overlay (immer sichtbar) */}
+                  {/* Entfernen-Overlay */}
                   <Button
                     variant="ghost"
                     onClick={() => removeAttachment(i)}
@@ -893,76 +1005,76 @@ if (pdfRenderFailed) {
                 </tbody>
               </table>
 
-              {/* Verpflegung */}
-              <div style={header}>Verpflegungsmehraufwand</div>
-              <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
-                <tbody>
-                  <tr>
-                    <td style={cell}>Tage &gt; 8 Std.</td>
-                    <td style={cell}>{verpf.tage8}</td>
-                    <td style={cell}>Satz {fmt(num(verpf.satz8))}</td>
-                    <td style={{ ...cell, textAlign: "right" }}>{fmt(num(verpf.tage8) * num(verpf.satz8))}</td>
-                  </tr>
-                  <tr>
-                    <td style={cell}>Tage 24 Std.</td>
-                    <td style={cell}>{verpf.tage24}</td>
-                    <td style={cell}>Satz {fmt(num(verpf.satz24))}</td>
-                    <td style={{ ...cell, textAlign: "right" }}>{fmt(num(verpf.tage24) * num(verpf.satz24))}</td>
-                  </tr>
-                  <tr>
-                    <td style={cell}>abzgl. Frühstück</td>
-                    <td style={cell}>{verpf.fruehstueckAbz}</td>
-                    <td style={cell}>{fmt(num(verpf.abzFruehstueck))} pro Frühstück</td>
-                    <td style={{ ...cell, textAlign: "right" }}>- {fmt(num(verpf.fruehstueckAbz) * num(verpf.abzFruehstueck))}</td>
-                  </tr>
-                  <tr>
-                    <td style={{ ...cell, fontWeight: 700 }} colSpan={3}>Zwischensumme</td>
-                    <td style={{ ...cell, textAlign: "right", fontWeight: 700 }}>{fmt(sumVerpf)}</td>
-                  </tr>
-                </tbody>
-              </table>
-
-              {/* Übernachtung */}
-              <div style={header}>Übernachtungskosten</div>
-              <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
-                <tbody>
-                  <tr>
-                    <td style={cell}>Tatsächliche Kosten (ohne Verpflegung)</td>
-                    <td style={cell} colSpan={2}></td>
-                    <td style={{ ...cell, textAlign: "right" }}>{fmt(num(uebernacht.tatsaechlich))}</td>
-                  </tr>
-                  <tr>
-                    <td style={cell}>Pauschale</td>
-                    <td style={cell} colSpan={2}></td>
-                    <td style={{ ...cell, textAlign: "right" }}>{fmt(num(uebernacht.pauschale))}</td>
-                  </tr>
-                  <tr>
-                    <td style={{ ...cell, fontWeight: 700 }} colSpan={3}>Zwischensumme</td>
-                    <td style={{ ...cell, textAlign: "right", fontWeight: 700 }}>{fmt(sumUebernacht)}</td>
-                  </tr>
-                </tbody>
-              </table>
-
-              {/* Sonstige Auslagen */}
-              <div style={header}>Sonstige Auslagen</div>
-              <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
-                <tbody>
-                  {auslagen.map((r, i) => (
-                    <tr key={i}>
-                      <td style={cell} colSpan={3}>{r.text || "—"}</td>
-                      <td style={{ ...cell, textAlign: "right" }}>{fmt(num(r.betrag))}</td>
+                {/* Verpflegung */}
+                <div style={header}>Verpflegungsmehraufwand</div>
+                <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
+                  <tbody>
+                    <tr>
+                      <td style={cell}>Tage &gt; 8 Std.</td>
+                      <td style={cell}>{verpf.tage8}</td>
+                      <td style={cell}>Satz {fmt(num(verpf.satz8))}</td>
+                      <td style={{ ...cell, textAlign: "right" }}>{fmt(num(verpf.tage8) * num(verpf.satz8))}</td>
                     </tr>
-                  ))}
-                  <tr>
-                    <td style={{ ...cell, fontWeight: 700 }} colSpan={3}>Zwischensumme</td>
-                    <td style={{ ...cell, textAlign: "right", fontWeight: 700 }}>{fmt(sumAuslagen)}</td>
-                  </tr>
-                </tbody>
-              </table>
+                    <tr>
+                      <td style={cell}>Tage 24 Std.</td>
+                      <td style={cell}>{verpf.tage24}</td>
+                      <td style={cell}>Satz {fmt(num(verpf.satz24))}</td>
+                      <td style={{ ...cell, textAlign: "right" }}>{fmt(num(verpf.tage24) * num(verpf.satz24))}</td>
+                    </tr>
+                    <tr>
+                      <td style={cell}>abzgl. Frühstück</td>
+                      <td style={cell}>{verpf.fruehstueckAbz}</td>
+                      <td style={cell}>{fmt(num(verpf.abzFruehstueck))} pro Frühstück</td>
+                      <td style={{ ...cell, textAlign: "right" }}>- {fmt(num(verpf.fruehstueckAbz) * num(verpf.abzFruehstueck))}</td>
+                    </tr>
+                    <tr>
+                      <td style={{ ...cell, fontWeight: 700 }} colSpan={3}>Zwischensumme</td>
+                      <td style={{ ...cell, textAlign: "right", fontWeight: 700 }}>{fmt(sumVerpf)}</td>
+                    </tr>
+                  </tbody>
+                </table>
 
-              <div style={{ textAlign: "right", marginTop: 16, fontWeight: 700, fontSize: 14 }}>
-                Gesamte Reisekosten: {fmt(gesamt)}
-              </div>
+                {/* Übernachtung */}
+                <div style={header}>Übernachtungskosten</div>
+                <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
+                  <tbody>
+                    <tr>
+                      <td style={cell}>Tatsächliche Kosten (ohne Verpflegung)</td>
+                      <td style={cell} colSpan={2}></td>
+                      <td style={{ ...cell, textAlign: "right" }}>{fmt(num(uebernacht.tatsaechlich))}</td>
+                    </tr>
+                    <tr>
+                      <td style={cell}>Pauschale</td>
+                      <td style={cell} colSpan={2}></td>
+                      <td style={{ ...cell, textAlign: "right" }}>{fmt(num(uebernacht.pauschale))}</td>
+                    </tr>
+                    <tr>
+                      <td style={{ ...cell, fontWeight: 700 }} colSpan={3}>Zwischensumme</td>
+                      <td style={{ ...cell, textAlign: "right", fontWeight: 700 }}>{fmt(sumUebernacht)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                {/* Auslagen */}
+                <div style={header}>Sonstige Auslagen</div>
+                <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
+                  <tbody>
+                    {auslagen.map((r, i) => (
+                      <tr key={i}>
+                        <td style={cell} colSpan={3}>{r.text || "—"}</td>
+                        <td style={{ ...cell, textAlign: "right" }}>{fmt(num(r.betrag))}</td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <td style={{ ...cell, fontWeight: 700 }} colSpan={3}>Zwischensumme</td>
+                      <td style={{ ...cell, textAlign: "right", fontWeight: 700 }}>{fmt(sumAuslagen)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                <div style={{ textAlign: "right", marginTop: 16, fontWeight: 700, fontSize: 14 }}>
+                  Gesamte Reisekosten: {fmt(gesamt)}
+                </div>
             </>
           );
         })()}
@@ -970,7 +1082,7 @@ if (pdfRenderFailed) {
 
       {/* Hinweis */}
       <div style={{ fontSize: 12, color: TOKENS.textMut, marginTop: 8 }}>
-        📷 Tipp: Bilder & PDFs hier hochladen – sie landen automatisch (komprimiert) in der Export-PDF.
+        📷 Tipp: Bilder & PDFs hier hochladen – sie landen automatisch (komprimiert) in der Export-PDF. Du kannst Dateien auch in das Feld ziehen.
       </div>
 
       {/* Test results */}
