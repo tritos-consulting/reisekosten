@@ -3,11 +3,12 @@ import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
 
 /**
- * Responsive + Spacing Update:
- * - Breakpoints: <768 (mobile), 768–1023 (tablet), ≥1024 (desktop)
- * - Größere Seitenränder & Spaltenabstände (mehr Luft links/rechts)
- * - Entfernen-Button bei Anhängen (Bilder & PDFs)
- * - Kompakte Inputs (36px) beibehalten
+ * Features:
+ * - 0,30 €/km (keine Staffel), KM aus Tachostand
+ * - Responsive Layout, größere Seitenränder/Spaltengaps
+ * - Upload: Bilder & PDFs, Entfernen-Button pro Beleg
+ * - PDF-Export komprimiert (JPEG) + Anhänge
+ * - PDF enthält: Fahrtkosten, Verpflegung, Übernachtung, Sonstige Auslagen
  */
 
 // --------- Design Tokens ----------
@@ -69,7 +70,6 @@ const CardTitle = ({ children }) => (
   <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: 0.2 }}>{children}</div>
 );
 
-// Mehr vertikaler Abstand innerhalb jeder Card
 const CardContent = ({ children }) => (
   <div style={{ padding: 20, display: "grid", gap: 24 }}>{children}</div>
 );
@@ -87,21 +87,9 @@ const Button = ({ children, onClick, variant = "primary", style, disabled }) => 
     transition: "all .15s ease",
   };
   const variants = {
-    primary: {
-      background: disabled ? "#9CA3AF" : TOKENS.primary,
-      color: "#fff",
-      borderColor: TOKENS.primary,
-    },
-    secondary: {
-      background: "#FFFFFF",
-      color: TOKENS.text,
-      borderColor: TOKENS.border,
-    },
-    danger: {
-      background: "#fff",
-      color: "#B91C1C",
-      borderColor: "#FCA5A5",
-    },
+    primary: { background: disabled ? "#9CA3AF" : TOKENS.primary, color: "#fff", borderColor: TOKENS.primary },
+    secondary: { background: "#FFFFFF", color: TOKENS.text, borderColor: TOKENS.border },
+    danger: { background: "#fff", color: "#B91C1C", borderColor: "#FCA5A5" },
   };
   return (
     <button
@@ -120,7 +108,7 @@ const Button = ({ children, onClick, variant = "primary", style, disabled }) => 
   );
 };
 
-// Kompaktere Inputs: 36px Höhe, 6/8px Padding
+// Kompakte Inputs: 36px Höhe, 6/8px Padding
 const Input = ({ style, ...props }) => (
   <input
     {...props}
@@ -147,7 +135,6 @@ const Input = ({ style, ...props }) => (
   />
 );
 
-// Labels mit etwas mehr Abstand nach unten
 const Label = ({ children, htmlFor }) => (
   <label
     htmlFor={htmlFor}
@@ -170,7 +157,6 @@ const num = (v) => {
   const n = typeof v === "number" ? v : parseFloat(String(v ?? "").replace(",", "."));
   return Number.isFinite(n) ? n : 0;
 };
-// ISO-KW
 function kwIsoFromDateStr(dateStr) {
   if (!dateStr) return "";
   const d = new Date(dateStr + "T00:00:00");
@@ -180,16 +166,16 @@ function kwIsoFromDateStr(dateStr) {
   dt.setUTCDate(dt.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1));
   const week = Math.ceil(((dt - yearStart) / 86400000 + 1) / 7);
-  const year = dt.getUTCFullYear();
+  const year = dt.getUTCF
+ullYear();
   return `${week}/${year}`;
 }
-// 0,30 €/km pauschal
 function kmFlatCost(km, rate = 0.30) {
   const k = Math.max(0, Math.floor(num(km) * 100) / 100);
   return k * rate;
 }
 
-// pdf.js dynamisch laden (für PDF-Anhänge)
+// pdf.js für PDF-Anhänge
 async function ensurePdfJs() {
   if (window.pdfjsLib) return window.pdfjsLib;
   const script = document.createElement("script");
@@ -300,8 +286,7 @@ export default function TravelExpenseFormDE() {
     if (next.length) setAttachments((prev) => [...prev, ...next]);
     e.target.value = "";
   };
-  const removeAttachment = (idx) =>
-    setAttachments((prev) => prev.filter((_, i) => i !== idx));
+  const removeAttachment = (idx) => setAttachments((prev) => prev.filter((_, i) => i !== idx));
 
   async function renderPdfFileToImages(file) {
     const pdfjsLib = await ensurePdfJs();
@@ -445,12 +430,8 @@ export default function TravelExpenseFormDE() {
   };
 
   // ---------- Responsive Grids ----------
-  // Seitenränder: größer auf Desktop
   const containerPadding = isDesktop(width) ? 40 : isTablet(width) ? 28 : 20;
-  // Spaltengaps: größer für mehr Breite
   const colGap = isDesktop(width) ? 28 : isTablet(width) ? 24 : 20;
-
-  // Helper: gibt repeat(...) je nach Breakpoint zurück
   const cols = (desktop, tablet, mobile) =>
     isDesktop(width) ? `repeat(${desktop}, minmax(0,1fr))` : isTablet(width) ? `repeat(${tablet}, minmax(0,1fr))` : `repeat(${mobile}, minmax(0,1fr))`;
 
@@ -650,11 +631,24 @@ export default function TravelExpenseFormDE() {
               <div key={r.id} style={{ display: "grid", gridTemplateColumns: cols(6, 3, 1), columnGap: colGap, rowGap: 24 }}>
                 <div style={{ gridColumn: isDesktop(width) ? "span 4" : isTablet(width) ? "span 2" : "span 1" }}>
                   <Label>Bezeichnung</Label>
-                  <Input placeholder="z.B. Smart Charge" value={r.text} onChange={(e) => setAuslagen((a) => a.map((x) => (x.id === r.id ? { ...x, text: e.target.value } : x)))} />
+                  <Input
+                    placeholder="z.B. Smart Charge"
+                    value={r.text}
+                    onChange={(e) =>
+                      setAuslagen((a) => a.map((x) => (x.id === r.id ? { ...x, text: e.target.value } : x)))
+                    }
+                  />
                 </div>
                 <div style={{ gridColumn: isDesktop(width) ? "span 2" : "span 1" }}>
                   <Label>Betrag (€)</Label>
-                  <Input inputMode="decimal" placeholder="0,00" value={r.betrag} onChange={(e) => setAuslagen((a) => a.map((x) => (x.id === r.id ? { ...x, betrag: e.target.value } : x)))} />
+                  <Input
+                    inputMode="decimal"
+                    placeholder="0,00"
+                    value={r.betrag}
+                    onChange={(e) =>
+                      setAuslagen((a) => a.map((x) => (x.id === r.id ? { ...x, betrag: e.target.value } : x)))
+                    }
+                  />
                 </div>
                 {auslagen.length > 1 && (
                   <div style={{ gridColumn: "1 / -1", marginTop: -4 }}>
@@ -783,6 +777,7 @@ export default function TravelExpenseFormDE() {
 
           return (
             <>
+              {/* Fahrtkosten */}
               <div style={header}>Fahrtkosten</div>
               <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
                 <tbody>
@@ -815,6 +810,7 @@ export default function TravelExpenseFormDE() {
                 </tbody>
               </table>
 
+              {/* Verpflegung */}
               <div style={header}>Verpflegungsmehraufwand</div>
               <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
                 <tbody>
@@ -843,6 +839,7 @@ export default function TravelExpenseFormDE() {
                 </tbody>
               </table>
 
+              {/* Übernachtung */}
               <div style={header}>Übernachtungskosten</div>
               <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
                 <tbody>
@@ -859,6 +856,23 @@ export default function TravelExpenseFormDE() {
                   <tr>
                     <td style={{ ...cell, fontWeight: 700 }} colSpan={3}>Zwischensumme</td>
                     <td style={{ ...cell, textAlign: "right", fontWeight: 700 }}>{fmt(sumUebernacht)}</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              {/* Sonstige Auslagen */}
+              <div style={header}>Sonstige Auslagen</div>
+              <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
+                <tbody>
+                  {auslagen.map((r, i) => (
+                    <tr key={i}>
+                      <td style={cell} colSpan={3}>{r.text || "—"}</td>
+                      <td style={{ ...cell, textAlign: "right" }}>{fmt(num(r.betrag))}</td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td style={{ ...cell, fontWeight: 700 }} colSpan={3}>Zwischensumme</td>
+                    <td style={{ ...cell, textAlign: "right", fontWeight: 700 }}>{fmt(sumAuslagen)}</td>
                   </tr>
                 </tbody>
               </table>
