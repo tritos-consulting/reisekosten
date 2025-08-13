@@ -8,6 +8,7 @@ import html2canvas from "html2canvas";
  * - Responsive Layout, größere Seitenränder/Spaltengaps
  * - Upload: Bilder & PDFs, Entfernen-Button pro Beleg (Overlay)
  * - PDF-Export komprimiert (JPEG) + Anhänge
+ * - Robustes pdf.js Laden (mehrere CDNs + Fallback, kein harter Abbruch)
  * - PDF enthält: Fahrtkosten, Verpflegung, Übernachtung, Sonstige Auslagen
  */
 
@@ -35,7 +36,6 @@ function useWindowWidth() {
   }, []);
   return w;
 }
-const isMobile = (w) => w < 768;
 const isTablet = (w) => w >= 768 && w < 1024;
 const isDesktop = (w) => w >= 1024;
 
@@ -111,7 +111,7 @@ const Button = ({ children, onClick, variant = "primary", style, disabled, title
   );
 };
 
-// Kompakte Inputs: 36px Höhe, 6/8px Padding
+// Kompakte Inputs
 const Input = ({ style, ...props }) => (
   <input
     {...props}
@@ -177,20 +177,50 @@ function kmFlatCost(km, rate = 0.30) {
   return k * rate;
 }
 
-// pdf.js für PDF-Anhänge
+// --------- pdf.js Loader mit Fallbacks ---------
+const PDFJS_VERSION = "4.4.168";
+const PDFJS_CANDIDATES = [
+  {
+    lib: `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.min.js`,
+    worker: `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.worker.min.js`,
+  },
+  {
+    lib: `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.min.js`,
+    worker: `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.js`,
+  },
+  {
+    lib: `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/build/pdf.min.js`,
+    worker: `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.js`,
+  },
+];
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.async = true;
+    s.crossOrigin = "anonymous";
+    s.onload = () => resolve(true);
+    s.onerror = () => reject(new Error(`Script load failed: ${src}`));
+    document.head.appendChild(s);
+  });
+}
+
 async function ensurePdfJs() {
   if (window.pdfjsLib) return window.pdfjsLib;
-  const script = document.createElement("script");
-  script.src = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.js";
-  script.async = true;
-  document.head.appendChild(script);
-  await new Promise((res, rej) => {
-    script.onload = res;
-    script.onerror = () => rej(new Error("pdf.js konnte nicht geladen werden."));
-  });
-  window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-    "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.js";
-  return window.pdfjsLib;
+  let lastErr;
+  for (const cdn of PDFJS_CANDIDATES) {
+    try {
+      await loadScript(cdn.lib);
+      if (!window.pdfjsLib) throw new Error("pdfjsLib global missing");
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = cdn.worker;
+      return window.pdfjsLib;
+    } catch (e) {
+      lastErr = e;
+      // try next CDN
+    }
+  }
+  throw new Error("pdf.js konnte nicht geladen werden.");
 }
 
 // Summen
@@ -352,14 +382,23 @@ export default function TravelExpenseFormDE() {
       const imgData = canvas.toDataURL("image/jpeg", 0.85);
       pdf.addImage(imgData, "JPEG", (pageWidth - w) / 2, margin, w, h);
 
-      // Anhänge sammeln
+      // Anhänge sammeln (mit sanftem Fallback)
       const allImages = [];
+      let pdfRenderFailed = false;
+
       for (const att of attachments) {
         if (att.kind === "image") {
           allImages.push({ dataUrl: att.dataUrl, name: att.name });
         } else if (att.kind === "pdf") {
-          const imgs = await renderPdfFileToImages(att.file);
-          imgs.forEach((img, i) => allImages.push({ dataUrl: img.dataUrl, name: `${att.name} (Seite ${i + 1})` }));
+          try {
+            const imgs = await renderPdfFileToImages(att.file);
+            imgs.forEach((img, i) =>
+              allImages.push({ dataUrl: img.dataUrl, name: `${att.name} (Seite ${i + 1})` })
+            );
+          } catch {
+            // pdf.js laden/rendern fehlgeschlagen -> PDFs überspringen, aber NICHT abbrechen
+            pdfRenderFailed = true;
+          }
         }
       }
 
@@ -404,6 +443,17 @@ export default function TravelExpenseFormDE() {
       const blob = pdf.output("blob");
       const url = URL.createObjectURL(blob);
       setPdfUrl(url);
+
+      // Hinweis statt Fehler, falls PDFs übersprungen wurden
+      if (attachments.some((a) => a.kind === "pdf")) {
+        // Nur Hinweis zeigen, wenn überhaupt PDF-Anhänge da waren
+        try {
+          await ensurePdfJs(); // wenn das hier klappt, kein Hinweis nötig
+        } catch {
+          setErrMsg("Hinweis: PDF-Anhänge konnten nicht gerendert werden (pdf.js-Ladevorgang fehlgeschlagen). Bilder wurden dennoch exportiert.");
+        }
+      }
+
       setBusy(false);
     } catch (err) {
       setBusy(false);
@@ -922,7 +972,7 @@ export default function TravelExpenseFormDE() {
       {testOutput.length > 0 && (
         <div style={{ marginTop: 16 }}>
           <Card>
-            <CardHeader><CardTitle>Testergebnisse</CardTitle></CardHeader>
+            <CardHeader><CardTitle>Testergebnisse</CardHeader></CardHeader>
             <CardContent>
               <ul style={{ display: "grid", gap: 6, fontSize: 14, margin: 0, paddingLeft: 16 }}>
                 {testOutput.map((t, i) => (
