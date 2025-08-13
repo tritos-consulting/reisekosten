@@ -6,7 +6,7 @@ import html2canvas from "html2canvas";
  * Features:
  * - 0,30 €/km (keine Staffel), KM aus Tachostand
  * - Responsive Layout, größere Seitenränder/Spaltengaps
- * - Upload: Bilder & PDFs, Entfernen-Button pro Beleg
+ * - Upload: Bilder & PDFs, Entfernen-Button pro Beleg (Overlay)
  * - PDF-Export komprimiert (JPEG) + Anhänge
  * - PDF enthält: Fahrtkosten, Verpflegung, Übernachtung, Sonstige Auslagen
  */
@@ -74,7 +74,7 @@ const CardContent = ({ children }) => (
   <div style={{ padding: 20, display: "grid", gap: 24 }}>{children}</div>
 );
 
-const Button = ({ children, onClick, variant = "primary", style, disabled }) => {
+const Button = ({ children, onClick, variant = "primary", style, disabled, title, ariaLabel }) => {
   const base = {
     height: 40,
     padding: "0 14px",
@@ -90,11 +90,14 @@ const Button = ({ children, onClick, variant = "primary", style, disabled }) => 
     primary: { background: disabled ? "#9CA3AF" : TOKENS.primary, color: "#fff", borderColor: TOKENS.primary },
     secondary: { background: "#FFFFFF", color: TOKENS.text, borderColor: TOKENS.border },
     danger: { background: "#fff", color: "#B91C1C", borderColor: "#FCA5A5" },
+    ghost: { background: "rgba(255,255,255,0.9)", color: "#111827", borderColor: "#E5E7EB" },
   };
   return (
     <button
       onClick={onClick}
       disabled={disabled}
+      title={title}
+      aria-label={ariaLabel || title}
       style={{ ...base, ...variants[variant], ...style }}
       onMouseEnter={(e) => {
         if (variant === "primary" && !disabled) e.currentTarget.style.background = TOKENS.primaryHover;
@@ -162,12 +165,11 @@ function kwIsoFromDateStr(dateStr) {
   const d = new Date(dateStr + "T00:00:00");
   if (isNaN(d)) return "";
   const dt = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  const dayNum = (dt.getUTCDay() + 6) % 7 + 1;
+  const dayNum = (dt.getUTCDay() + 6) % 7 + 1; // 1..7 (Mo..So)
   dt.setUTCDate(dt.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1));
   const week = Math.ceil(((dt - yearStart) / 86400000 + 1) / 7);
-  const year = dt.getUTCF
-ullYear();
+  const year = dt.getUTCFullYear(); // <- FIX
   return `${week}/${year}`;
 }
 function kmFlatCost(km, rate = 0.30) {
@@ -560,7 +562,7 @@ export default function TravelExpenseFormDE() {
       {/* Verpflegungsmehraufwand */}
       <div style={{ height: 18 }} />
       <Card>
-        <CardHeader><CardTitle>Verpflegungsmehraufwand</CardTitle></CardHeader>
+        <CardHeader><CardTitle>Verpflegungsmehraufwand</CardHeader></CardHeader>
         <CardContent>
           <div style={{ display: "grid", gridTemplateColumns: cols(2, 2, 1), columnGap: colGap, rowGap: 24 }}>
             <div>
@@ -685,26 +687,52 @@ export default function TravelExpenseFormDE() {
                     display: "grid",
                     alignItems: "center",
                     justifyItems: "center",
-                    gridTemplateRows: "1fr auto",
+                    gridTemplateRows: "1fr",
                     aspectRatio: "1 / 1",
                     overflow: "hidden",
                     position: "relative",
+                    background: "#fff",
                   }}
                 >
+                  {/* Entfernen-Overlay (immer sichtbar) */}
+                  <Button
+                    variant="ghost"
+                    onClick={() => removeAttachment(i)}
+                    title="Beleg entfernen"
+                    ariaLabel={`Anhang ${att.name} entfernen`}
+                    style={{
+                      position: "absolute",
+                      top: 8,
+                      right: 8,
+                      height: 30,
+                      padding: "0 10px",
+                      borderRadius: 10,
+                      backdropFilter: "blur(2px)",
+                    }}
+                  >
+                    Entfernen ✕
+                  </Button>
+
                   {att.kind === "image" ? (
-                    <img src={att.dataUrl} alt={att.name} style={{ objectFit: "contain", width: "100%", height: "100%" }} />
+                    <img
+                      src={att.dataUrl}
+                      alt={att.name}
+                      style={{
+                        objectFit: "contain",
+                        maxWidth: "100%",
+                        maxHeight: "100%",
+                        width: "auto",
+                        height: "auto",
+                        placeSelf: "center",
+                      }}
+                    />
                   ) : (
-                    <div style={{ textAlign: "center", fontSize: 12, color: TOKENS.textDim, padding: 8 }}>
+                    <div style={{ textAlign: "center", fontSize: 12, color: TOKENS.textDim, padding: 8, placeSelf: "center" }}>
                       📄
                       <div style={{ marginTop: 6, wordBreak: "break-word" }}>{att.name}</div>
                       <div style={{ marginTop: 6, fontSize: 11, color: TOKENS.textMut }}>PDF wird beim Export gerendert</div>
                     </div>
                   )}
-                  <div style={{ marginTop: 8 }}>
-                    <Button variant="danger" onClick={() => removeAttachment(i)} style={{ height: 32, padding: "0 10px" }}>
-                      Entfernen
-                    </Button>
-                  </div>
                 </div>
               ))}
             </div>
