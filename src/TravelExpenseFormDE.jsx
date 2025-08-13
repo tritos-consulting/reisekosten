@@ -462,7 +462,7 @@ export default function TravelExpenseFormDE() {
 
       // Logo nur auf der ERSTEN Seite
       if (logoImg) {
-        pdf.addImage(logoImg, "PNG", pageW - margin - LOGO_W, margin, LOGO_W, LOGO_H);
+      pdf.addImage(logoImg, "PNG", pageW - 80 - LOGO_W, margin, LOGO_W, LOGO_H);
       }
 
       // ---- Anhänge (A4, 1 pro Seite, Orientierung je Seite) ----
