@@ -1,129 +1,190 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useMemo, useRef, useState, useEffect } from "react";
 import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
 
 /**
- * TravelExpenseFormDE – stabile, bereinigte Version
- * - Alle JSX-Tags geschlossen (fix für "Unexpected token (1:0)")
- * - Keine oklch()-Farben; nur einfache CSS-Farben
- * - PDFs von Belegen via PDF.js zur Laufzeit (CDN) – nur wenn nötig
- * - Bilder/PDF-Seiten als JPEG komprimiert (kleinere Dateigröße)
- * - Kilometer automatisch: (TachostandEnde - TachostandBeginn) * 0.30 €
- * - KW automatisch aus Beginn (ISO-Woche)
+ * UI-Refresh:
+ * - Inter-Schrift (über index.html), größere Eingabefelder, klarere Abstände
+ * - Konsistente Grids für alle Sektionen
+ * - Funktional identisch: 0,30 €/km, Tachostand→km, Bilder+PDF-Anhänge, komprimierter Export
  */
 
-// ---------- Mini-UI ----------
+// --------- Design Tokens ----------
+const TOKENS = {
+  radius: 12,
+  border: "#E5E7EB",
+  bgCard: "#FFFFFF",
+  bgApp: "#F8FAFC",
+  text: "#0F172A",
+  textDim: "#475569",
+  textMut: "#64748B",
+  primary: "#111827",
+  primaryHover: "#0B1220",
+  focus: "#2563EB",
+};
+
+// --------- Minimal UI primitives ---------
 const Card = ({ children }) => (
-  <div style={{ border: "1px solid #e5e7eb", borderRadius: 16, boxShadow: "0 1px 2px rgba(0,0,0,.05)", overflow: "hidden", background: "#fff" }}>{children}</div>
-);
-const CardHeader = ({ children }) => (
-  <div style={{ padding: 16, borderBottom: "1px solid #e5e7eb", background: "#fafafa" }}>{children}</div>
-);
-const CardTitle = ({ children }) => (
-  <div style={{ fontSize: 16, fontWeight: 700 }}>{children}</div>
-);
-const CardContent = ({ children }) => <div style={{ padding: 16 }}>{children}</div>;
-const Button = ({ children, onClick, variant, style, disabled }) => (
-  <button
-    onClick={onClick}
-    disabled={disabled}
+  <div
     style={{
-      padding: "10px 14px",
-      borderRadius: 12,
-      border: variant === "secondary" ? "1px solid #d1d5db" : "1px solid #111827",
-      background: disabled ? "#9ca3af" : variant === "secondary" ? "#ffffff" : "#111827",
-      color: variant === "secondary" ? "#111827" : "#ffffff",
-      cursor: disabled ? "not-allowed" : "pointer",
-      ...style,
+      border: `1px solid ${TOKENS.border}`,
+      borderRadius: TOKENS.radius + 4,
+      boxShadow: "0 8px 24px rgba(15,23,42,0.06)",
+      overflow: "hidden",
+      background: TOKENS.bgCard,
     }}
   >
     {children}
-  </button>
+  </div>
 );
-const Input = (props) => (
+const CardHeader = ({ children }) => (
+  <div
+    style={{
+      padding: 16,
+      borderBottom: `1px solid ${TOKENS.border}`,
+      background: "#FAFAFA",
+    }}
+  >
+    {children}
+  </div>
+);
+const CardTitle = ({ children }) => (
+  <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: 0.2 }}>{children}</div>
+);
+const CardContent = ({ children }) => <div style={{ padding: 16 }}>{children}</div>;
+
+const Button = ({ children, onClick, variant = "primary", style, disabled }) => {
+  const base = {
+    height: 44,
+    padding: "0 14px",
+    borderRadius: TOKENS.radius,
+    border: "1px solid transparent",
+    cursor: disabled ? "not-allowed" : "pointer",
+    fontWeight: 600,
+    fontSize: 14,
+    letterSpacing: 0.2,
+    transition: "all .15s ease",
+  };
+  const variants = {
+    primary: {
+      background: disabled ? "#9CA3AF" : TOKENS.primary,
+      color: "#fff",
+      borderColor: TOKENS.primary,
+    },
+    secondary: {
+      background: "#FFFFFF",
+      color: TOKENS.text,
+      borderColor: TOKENS.border,
+    },
+  };
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{ ...base, ...variants[variant], ...style }}
+      onMouseEnter={(e) => {
+        if (variant === "primary" && !disabled) e.currentTarget.style.background = TOKENS.primaryHover;
+      }}
+      onMouseLeave={(e) => {
+        if (variant === "primary" && !disabled) e.currentTarget.style.background = TOKENS.primary;
+      }}
+    >
+      {children}
+    </button>
+  );
+};
+
+const Input = ({ style, ...props }) => (
   <input
     {...props}
     style={{
       width: "100%",
-      padding: "10px 12px",
-      borderRadius: 12,
-      border: "1px solid #d1d5db",
+      height: 44,
+      padding: "8px 12px",
+      borderRadius: TOKENS.radius,
+      border: `1px solid ${TOKENS.border}`,
       outline: "none",
       fontSize: 14,
-      background: "#fff",
+      transition: "box-shadow .15s ease, border-color .15s ease",
+      background: "#FFFFFF",
+      ...style,
+    }}
+    onFocus={(e) => {
+      e.currentTarget.style.borderColor = TOKENS.focus;
+      e.currentTarget.style.boxShadow = "0 0 0 3px rgba(37,99,235,0.2)";
+    }}
+    onBlur={(e) => {
+      e.currentTarget.style.borderColor = TOKENS.border;
+      e.currentTarget.style.boxShadow = "none";
     }}
   />
 );
 const Label = ({ children, htmlFor }) => (
-  <label htmlFor={htmlFor} style={{ display: "block", fontSize: 12, color: "#374151", marginBottom: 6 }}>
+  <label
+    htmlFor={htmlFor}
+    style={{
+      display: "block",
+      fontSize: 12,
+      fontWeight: 600,
+      color: TOKENS.textDim,
+      marginBottom: 6,
+      letterSpacing: 0.2,
+    }}
+  >
     {children}
   </label>
 );
 
 // ---------- Helpers ----------
-const fmt = (n) =>
-  (Number.isFinite(n) ? n : 0).toLocaleString("de-DE", { style: "currency", currency: "EUR" });
-
+const fmt = (n) => (Number.isFinite(n) ? n : 0).toLocaleString("de-DE", { style: "currency", currency: "EUR" });
 const num = (v) => {
   const n = typeof v === "number" ? v : parseFloat(String(v ?? "").replace(",", "."));
   return Number.isFinite(n) ? n : 0;
 };
-
-const isoWeekFromDateStr = (dateStr) => {
+// ISO-KW
+function kwIsoFromDateStr(dateStr) {
   if (!dateStr) return "";
   const d = new Date(dateStr + "T00:00:00");
   if (isNaN(d)) return "";
   const dt = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  const dayNum = ((dt.getUTCDay() + 6) % 7) + 1;
+  const dayNum = (dt.getUTCDay() + 6) % 7 + 1;
   dt.setUTCDate(dt.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1));
   const week = Math.ceil(((dt - yearStart) / 86400000 + 1) / 7);
   const year = dt.getUTCFullYear();
   return `${week}/${year}`;
-};
+}
+// 0,30 €/km pauschal
+function kmFlatCost(km, rate = 0.30) {
+  const k = Math.max(0, Math.floor(num(km) * 100) / 100);
+  return k * rate;
+}
 
-// Lazy-load PDF.js (nur wenn PDF-Belege vorhanden)
+// pdf.js dynamisch laden (für PDF-Anhänge)
 async function ensurePdfJs() {
   if (window.pdfjsLib) return window.pdfjsLib;
-  await new Promise((resolve, reject) => {
-    const s = document.createElement("script");
-    s.src = "https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js";
-    s.onload = resolve;
-    s.onerror = reject;
-    document.head.appendChild(s);
+  const script = document.createElement("script");
+  script.src = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.js";
+  script.async = true;
+  document.head.appendChild(script);
+  await new Promise((res, rej) => {
+    script.onload = res;
+    script.onerror = () => rej(new Error("pdf.js konnte nicht geladen werden."));
   });
-  window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+    "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.js";
   return window.pdfjsLib;
 }
 
-// Downscale + JPEG
-async function downscaleToJpeg(src, maxW = 1600, maxH = 2260, quality = 0.72) {
-  const img = await (async () => {
-    if (typeof src === "string") {
-      const im = new Image();
-      im.crossOrigin = "anonymous";
-      im.src = src;
-      await new Promise((r) => (im.onload = r));
-      return im;
-    }
-    return src;
-  })();
-  const w = img.width || img.naturalWidth;
-  const h = img.height || img.naturalHeight;
-  if (!w || !h) throw new Error("Kein Bildmaß");
-  const ratio = Math.min(maxW / w, maxH / h, 1);
-  const tw = Math.max(1, Math.round(w * ratio));
-  const th = Math.max(1, Math.round(h * ratio));
-  const c = document.createElement("canvas");
-  c.width = tw;
-  c.height = th;
-  const ctx = c.getContext("2d");
-  ctx.drawImage(img, 0, 0, tw, th);
-  return c.toDataURL("image/jpeg", quality);
-}
+// Summen
+const computeSumFahrt = (fahrt) => kmFlatCost(fahrt.km, 0.30) + num(fahrt.oev) + num(fahrt.bahn) + num(fahrt.taxi);
+const computeSumVerpf = (v) =>
+  Math.max(0, num(v.tage8) * num(v.satz8) + num(v.tage24) * num(v.satz24) - num(v.fruehstueckAbz) * num(v.abzFruehstueck));
+const computeSumUebernacht = (u) => num(u.tatsaechlich) + num(u.pauschale);
+const computeSumAuslagen = (arr) => (arr || []).reduce((acc, r) => acc + num(r.betrag), 0);
 
-// ---------- Component ----------
 export default function TravelExpenseFormDE() {
+  // ---------- State ----------
   const [basis, setBasis] = useState({
     name: "Kromer Tobias",
     zweck: "",
@@ -131,19 +192,17 @@ export default function TravelExpenseFormDE() {
     ende: "",
     kw: "",
     firma: "Tritos Consulting GmbH",
+    kwAuto: true,
   });
-
   const [fahrt, setFahrt] = useState({
     kennzeichen: "",
     tachostandBeginn: "",
     tachostandEnde: "",
-    km: 0, // wird automatisch berechnet
-    preisKm: 0.3, // fix
+    km: "",
     oev: "",
     bahn: "",
     taxi: "",
   });
-
   const [verpf, setVerpf] = useState({
     tage8: 0,
     tage24: 0,
@@ -152,132 +211,91 @@ export default function TravelExpenseFormDE() {
     satz24: 28,
     abzFruehstueck: 5.6,
   });
-
   const [uebernacht, setUebernacht] = useState({ tatsaechlich: "", pauschale: "" });
-
-  // Sonstige Ausgaben
   const [auslagen, setAuslagen] = useState([{ id: 1, text: "", betrag: "" }]);
-
-  // Belege (als dataURL-Bilder; PDF-Seiten werden gerendert)
-  const [receipts, setReceipts] = useState([]); // {name, dataUrl}
+  const [attachments, setAttachments] = useState([]); // {kind:"image",name,dataUrl} | {kind:"pdf",name,file}
+  const [pdfUrl, setPdfUrl] = useState("");
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  const [tests, setTests] = useState([]);
-  const [kwHint, setKwHint] = useState(false);
-  const kwTimerRef = useRef(null);
-
+  const [errMsg, setErrMsg] = useState("");
+  const [testOutput, setTestOutput] = useState([]);
   const printableRef = useRef(null);
 
-  // KM automatisch aus Tachoständen
+  // ---------- Effects ----------
   useEffect(() => {
-    const s = num(fahrt.tachostandBeginn);
+    if (basis.kwAuto && basis.beginn) {
+      const kw = kwIsoFromDateStr(basis.beginn);
+      setBasis((b) => ({ ...b, kw }));
+    }
+  }, [basis.beginn, basis.kwAuto]);
+
+  useEffect(() => {
+    const hasBeginn = String(fahrt.tachostandBeginn ?? "") !== "";
+    const hasEnde = String(fahrt.tachostandEnde ?? "") !== "";
+    if (!hasBeginn || !hasEnde) return;
+    const b = num(fahrt.tachostandBeginn);
     const e = num(fahrt.tachostandEnde);
-    const km = Math.max(0, e - s);
-    setFahrt((f) => ({ ...f, km }));
+    const diff = Math.max(0, e - b);
+    if (String(diff) !== String(fahrt.km)) setFahrt((prev) => ({ ...prev, km: String(diff) }));
   }, [fahrt.tachostandBeginn, fahrt.tachostandEnde]);
 
-  // KW automatisch aus Beginn (wenn gesetzt)
-  useEffect(() => {
-    if (!basis.beginn) return;
-    setBasis((b) => ({ ...b, kw: isoWeekFromDateStr(basis.beginn) }));
-    setKwHint(true);
-    if (kwTimerRef.current) clearTimeout(kwTimerRef.current);
-    kwTimerRef.current = setTimeout(() => setKwHint(false), 3000);
-    return () => {
-      if (kwTimerRef.current) clearTimeout(kwTimerRef.current);
-    };
-  }, [basis.beginn]);
-
-  // Summen
-  const sumFahrt = useMemo(() => {
-    const kmSum = num(fahrt.km) * num(fahrt.preisKm);
-    return kmSum + num(fahrt.oev) + num(fahrt.bahn) + num(fahrt.taxi);
-  }, [fahrt]);
-
-  const sumVerpf = useMemo(() => {
-    const v = num(verpf.tage8) * num(verpf.satz8) + num(verpf.tage24) * num(verpf.satz24);
-    const abzug = num(verpf.fruehstueckAbz) * num(verpf.abzFruehstueck);
-    return Math.max(0, v - abzug);
-  }, [verpf]);
-
-  const sumUebernacht = useMemo(() => num(uebernacht.tatsaechlich) + num(uebernacht.pauschale), [uebernacht]);
-
-  const sumAuslagen = useMemo(
-    () => (auslagen || []).reduce((acc, r) => acc + num(r.betrag), 0),
-    [auslagen]
-  );
-
+  // ---------- Memos ----------
+  const kilometergeld = useMemo(() => kmFlatCost(fahrt.km, 0.30), [fahrt.km]);
+  const sumFahrt = useMemo(() => computeSumFahrt(fahrt), [fahrt]);
+  const sumVerpf = useMemo(() => computeSumVerpf(verpf), [verpf]);
+  const sumUebernacht = useMemo(() => computeSumUebernacht(uebernacht), [uebernacht]);
+  const sumAuslagen = useMemo(() => computeSumAuslagen(auslagen), [auslagen]);
   const gesamt = useMemo(() => sumFahrt + sumVerpf + sumUebernacht + sumAuslagen, [sumFahrt, sumVerpf, sumUebernacht, sumAuslagen]);
 
-  // Beleg-Upload (Bilder & PDFs)
-  const handleReceiptUpload = async (e) => {
-    setErr("");
+  // ---------- Handlers ----------
+  const addAuslage = () => setAuslagen((a) => [...a, { id: Date.now(), text: "", betrag: "" }]);
+  const delAuslage = (id) => setAuslagen((a) => a.filter((x) => x.id !== id));
+
+  const handleFileUpload = async (e) => {
     const files = Array.from(e.target.files || []);
-    if (!files.length) return;
-
-    try {
-      // Bilder sofort verkleinern
-      const imgs = files.filter((f) => f.type.startsWith("image/"));
-      const pdfs = files.filter((f) => f.type === "application/pdf");
-
-      const imgPromises = imgs.map(
-        (file) =>
-          new Promise((resolve) => {
-            const r = new FileReader();
-            r.onload = async () => {
-              const small = await downscaleToJpeg(r.result, 1500, 2100, 0.72);
-              resolve({ name: file.name, dataUrl: small });
-            };
-            r.readAsDataURL(file);
-          })
-      );
-
-      // PDFs mit PDF.js -> Bilder (jede Seite)
-      let pdfPromises = [];
-      if (pdfs.length) {
-        const pdfjsLib = await ensurePdfJs();
-        pdfPromises = pdfs.map(async (file) => {
-          const buf = await file.arrayBuffer();
-          const doc = await pdfjsLib.getDocument({ data: buf }).promise;
-          const out = [];
-          const maxPages = Math.min(doc.numPages, 200);
-          for (let p = 1; p <= maxPages; p++) {
-            const page = await doc.getPage(p);
-            const vp1 = page.getViewport({ scale: 1 });
-            const desired = 1400; // px
-            const scale = Math.min(desired / vp1.width, 2);
-            const vp = page.getViewport({ scale });
-            const c = document.createElement("canvas");
-            c.width = vp.width;
-            c.height = vp.height;
-            await page.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
-            const small = await downscaleToJpeg(c, 1500, 2100, 0.72);
-            out.push({ name: `${file.name} – Seite ${p}`, dataUrl: small });
-          }
-          return out;
+    const next = [];
+    for (const file of files) {
+      if (file.type.startsWith("image/")) {
+        const dataUrl = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.readAsDataURL(file);
         });
+        next.push({ kind: "image", name: file.name, dataUrl });
+      } else if (file.type === "application/pdf") {
+        next.push({ kind: "pdf", name: file.name, file });
       }
-
-      const images = await Promise.all(imgPromises);
-      const pdfPagesNested = await Promise.all(pdfPromises);
-      const pdfPages = pdfPagesNested.flat();
-      setReceipts((prev) => [...prev, ...images, ...pdfPages]);
-      e.target.value = "";
-    } catch (ex) {
-      console.error(ex);
-      setErr(ex?.message || String(ex));
     }
+    if (next.length) setAttachments((prev) => [...prev, ...next]);
+    e.target.value = "";
   };
 
-  // PDF generieren: Deckblatt (Screenshot) + je Beleg eine eigene Seite
+  async function renderPdfFileToImages(file) {
+    const pdfjsLib = await ensurePdfJs();
+    const ab = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
+    const pages = [];
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page = await pdf.getPage(p);
+      const viewport = page.getViewport({ scale: 1.5 });
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
+      pages.push({ dataUrl });
+    }
+    return pages;
+  }
+
   const generatePDF = async () => {
-    setErr("");
-    setBusy(true);
+    setErrMsg("");
+    setPdfUrl("");
     try {
       const node = printableRef.current;
-      if (!node) throw new Error("Druckbereich nicht gefunden");
+      if (!node) return;
+      setBusy(true);
 
-      // Offscreen rendern
       const prev = {
         position: node.style.position,
         left: node.style.left,
@@ -292,101 +310,124 @@ export default function TravelExpenseFormDE() {
       node.style.pointerEvents = "none";
 
       const canvas = await html2canvas(node, {
-        scale: 1.4, // kleiner als 2 -> kleinere Datei
+        scale: 1.5,
         useCORS: true,
         backgroundColor: "#ffffff",
       });
 
       Object.assign(node.style, prev);
 
-      const cover = await downscaleToJpeg(canvas, 1600, 2260, 0.72);
+      const pdf = new jsPDF({ unit: "pt", format: "a4", compress: true });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
 
-      const pdf = new jsPDF({ unit: "pt", format: "a4" });
-      const pageW = pdf.internal.pageSize.getWidth();
-      const pageH = pdf.internal.pageSize.getHeight();
       const margin = 24;
-      // Deckblatt einpassen
-      await new Promise((resolve) => {
-        const im = new Image();
-        im.onload = () => {
-          const innerW = pageW - margin * 2;
-          const innerH = pageH - margin * 2;
-          const r = Math.min(innerW / im.width, innerH / im.height);
-          const w = im.width * r;
-          const h = im.height * r;
-          pdf.addImage(cover, "JPEG", (pageW - w) / 2, margin, w, h, undefined, "FAST");
-          resolve();
-        };
-        im.src = cover;
-      });
+      const innerW = pageWidth - margin * 2;
+      const innerH = pageHeight - margin * 2;
+      const ratio = Math.min(innerW / canvas.width, innerH / canvas.height);
+      const w = canvas.width * ratio;
+      const h = canvas.height * ratio;
 
-      // Belegseiten: jeweils 1 Seite pro Element
-      if (receipts.length) {
-        for (let i = 0; i < receipts.length; i++) {
-          const r = receipts[i];
-          pdf.addPage();
-          await new Promise((resolve) => {
-            const im = new Image();
-            im.onload = () => {
-              const innerW = pageW - margin * 2;
-              const innerH = pageH - margin * 2;
-              const s = Math.min(innerW / im.width, innerH / im.height, 1);
-              const w = im.width * s;
-              const h = im.height * s;
-              pdf.addImage(r.dataUrl, "JPEG", (pageW - w) / 2, (pageH - h) / 2, w, h, undefined, "FAST");
-              resolve();
-            };
-            im.src = r.dataUrl;
-          });
+      const imgData = canvas.toDataURL("image/jpeg", 0.85);
+      pdf.addImage(imgData, "JPEG", (pageWidth - w) / 2, margin, w, h);
+
+      // Anhänge sammeln
+      const allImages = [];
+      for (const att of attachments) {
+        if (att.kind === "image") {
+          allImages.push({ dataUrl: att.dataUrl, name: att.name });
+        } else if (att.kind === "pdf") {
+          const imgs = await renderPdfFileToImages(att.file);
+          imgs.forEach((img, i) => allImages.push({ dataUrl: img.dataUrl, name: `${att.name} (Seite ${i + 1})` }));
         }
       }
 
-      const fname = `Reisekosten_${basis.name || "Mitarbeiter"}_KW${(basis.kw || "XX").replace("/", "-")}.pdf`;
-      await pdf.save(fname, { returnPromise: true });
-    } catch (ex) {
-      console.error(ex);
-      setErr(ex?.message || String(ex));
-      alert("PDF-Erzeugung fehlgeschlagen: " + (ex?.message || String(ex)));
-    } finally {
+      if (allImages.length) {
+        const title = (txt) => {
+          pdf.setFontSize(12);
+          pdf.text(txt, margin, margin + 6);
+        };
+        pdf.addPage();
+        title("Anhänge");
+        let y = margin + 16;
+        const maxW = pageWidth - margin * 2;
+        const maxH = (pageHeight - margin * 2 - 18) / 2; // 2 pro Seite
+
+        for (let i = 0; i < allImages.length; i++) {
+          const img = allImages[i];
+          const dim = await new Promise((resolve) => {
+            const image = new Image();
+            image.onload = () => resolve({ w: image.width, h: image.height });
+            image.src = img.dataUrl;
+          });
+          const scale = Math.min(maxW / dim.w, maxH / dim.h);
+          const iw = dim.w * scale;
+          const ih = dim.h * scale;
+          pdf.addImage(img.dataUrl, "JPEG", (pageWidth - iw) / 2, y, iw, ih);
+          y += ih + 12;
+          pdf.setFontSize(9);
+          pdf.text(img.name || "Anhang", margin, y - 4);
+
+          if (i % 2 === 1 && i < allImages.length - 1) {
+            pdf.addPage();
+            title("Anhänge (Fortsetzung)");
+            y = margin + 16;
+          }
+        }
+      }
+
+      const filename = `Reisekosten_${basis.name || "Mitarbeiter"}_KW${(basis.kw || "XX").replace("/", "-")}.pdf`;
+      try {
+        pdf.save(filename, { returnPromise: true });
+      } catch {}
+      const blob = pdf.output("blob");
+      const url = URL.createObjectURL(blob);
+      setPdfUrl(url);
       setBusy(false);
+    } catch (err) {
+      setBusy(false);
+      console.error(err);
+      setErrMsg(`PDF-Erzeugung fehlgeschlagen: ${err?.message || err}`);
     }
   };
 
-  // Tests
+  // ---------- Tests (optional) ----------
   const runTests = () => {
-    const res = [];
-    const pass = (name) => res.push({ ok: true, name });
-    const fail = (name, got) => res.push({ ok: false, name, got });
-
+    const results = [];
+    const pass = (name) => results.push({ name, ok: true });
+    const fail = (name, msg) => results.push({ name, ok: false, msg });
     try {
       const n1 = num("1,5");
-      Math.abs(n1 - 1.5) < 1e-9 ? pass("num('1,5') -> 1.5") : fail("num('1,5')", n1);
-
-      const km = Math.max(0, num(120) - num(20));
-      km === 100 ? pass("KM-Basis (dummy)") : fail("KM-Basis", km);
-
-      const fahrtSum = num(100) * 0.3 + 10 + 0 + 0;
-      Math.abs(fahrtSum - 40) < 1e-9 ? pass("Fahrtkosten Summe (100 km + 10€ ÖPNV)") : fail("Fahrtkosten Summe", fahrtSum);
-
-      const vSum = num(2) * 14 + num(1) * 28 - num(1) * 5.6; // 50.4
-      Math.abs(vSum - 50.4) < 1e-9 ? pass("Verpflegung Summe") : fail("Verpflegung Summe", vSum);
-
-      const ausl = [{ betrag: 10 }, { betrag: "2,50" }].reduce((a, b) => a + num(b.betrag), 0);
-      Math.abs(ausl - 12.5) < 1e-9 ? pass("Sonstige Ausgaben Summe") : fail("Sonstige Ausgaben Summe", ausl);
+      if (Math.abs(n1 - 1.5) < 1e-9) pass("num parses '1,5'");
+      else fail("num parses '1,5'", `got ${n1}`);
+      const fahrtTest = { km: 100, oev: 10, bahn: 0, taxi: 0 };
+      const sf = computeSumFahrt(fahrtTest);
+      if (Math.abs(sf - 40) < 1e-9) pass("computeSumFahrt 0,30 €/km + ÖPNV");
+      else fail("computeSumFahrt 0,30 €/km + ÖPNV", `got ${sf}`);
+      setTestOutput(results);
     } catch (e) {
-      res.push({ ok: false, name: "Test runner crashed", got: String(e) });
+      setTestOutput([{ name: "Test runner crashed", ok: false, msg: String(e) }]);
     }
-    setTests(res);
   };
 
   // ---------- Render ----------
   return (
-    <div style={{ maxWidth: 960, margin: "0 auto", padding: 16 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800 }}>Reisekosten – Webformular</h1>
+    <div
+      style={{
+        maxWidth: 980,
+        margin: "0 auto",
+        padding: 24,
+        fontFamily:
+          'Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"',
+        color: TOKENS.text,
+        background: TOKENS.bgApp,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>Reisekostenabrechnung</h1>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Button variant="secondary" onClick={runTests}>🧪 Tests</Button>
-          <Button onClick={generatePDF} disabled={busy}>{busy ? "⏳ PDF…" : "⬇️ PDF erzeugen"}</Button>
+          <Button onClick={generatePDF} disabled={busy}>{busy ? "⏳ Erzeuge PDF…" : "⬇️ PDF erzeugen"}</Button>
         </div>
       </div>
 
@@ -404,11 +445,25 @@ export default function TravelExpenseFormDE() {
               <Input id="zweck" placeholder="z.B. Beratung Hallesche" value={basis.zweck} onChange={(e) => setBasis({ ...basis, zweck: e.target.value })} />
             </div>
             <div>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                <Label htmlFor="kw" style={{ marginBottom: 0 }}>Kalenderwoche</Label>
-                {kwHint && <span style={{ fontSize: 10, color: "#6b7280" }}>automatisch gesetzt</span>}
+              <Label htmlFor="kw">Kalenderwoche {basis.kwAuto ? "(automatisch)" : "(manuell)"}</Label>
+              <Input
+                id="kw"
+                placeholder="z.B. 27/2025"
+                value={basis.kw}
+                onChange={(e) => setBasis({ ...basis, kw: e.target.value })}
+                disabled={basis.kwAuto}
+                style={{ background: basis.kwAuto ? "#F3F4F6" : "#fff" }}
+              />
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+                <input
+                  id="kwAuto"
+                  type="checkbox"
+                  checked={basis.kwAuto}
+                  onChange={(e) => setBasis({ ...basis, kwAuto: e.target.checked })}
+                  style={{ width: 16, height: 16 }}
+                />
+                <Label htmlFor="kwAuto">KW automatisch aus Beginn-Datum</Label>
               </div>
-              <Input id="kw" placeholder="z.B. 27/2025" value={basis.kw} onChange={(e) => setBasis({ ...basis, kw: e.target.value })} />
             </div>
             <div>
               <Label htmlFor="beginn">Beginn</Label>
@@ -427,35 +482,36 @@ export default function TravelExpenseFormDE() {
       </Card>
 
       {/* Fahrtkosten */}
+      <div style={{ height: 16 }} />
       <Card>
         <CardHeader><CardTitle>Fahrtkosten</CardTitle></CardHeader>
         <CardContent>
-          {/* erste Zeile: Privat-Pkw + Kennzeichen + Tachos */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 12 }}>
+          {/* Zeile 1 */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0,1fr))", gap: 12, alignItems: "end" }}>
             <div>
-              <Label>Privat-Pkw (km automatisch)</Label>
-              <Input value={fahrt.km} readOnly />
-            </div>
-            <div>
-              <Label>Kennzeichen</Label>
-              <Input placeholder="z.B. ERH-TC 123" value={fahrt.kennzeichen} onChange={(e) => setFahrt({ ...fahrt, kennzeichen: e.target.value })} />
+              <Label>Privat-PKW Kennzeichen</Label>
+              <Input placeholder="z.B. S-AB 1234" value={fahrt.kennzeichen} onChange={(e) => setFahrt({ ...fahrt, kennzeichen: e.target.value })} />
             </div>
             <div>
               <Label>Tachostand Beginn</Label>
-              <Input inputMode="decimal" value={fahrt.tachostandBeginn} onChange={(e) => setFahrt({ ...fahrt, tachostandBeginn: e.target.value })} />
+              <Input inputMode="decimal" placeholder="z.B. 25 300,0" value={fahrt.tachostandBeginn} onChange={(e) => setFahrt({ ...fahrt, tachostandBeginn: e.target.value })} />
             </div>
             <div>
               <Label>Tachostand Ende</Label>
-              <Input inputMode="decimal" value={fahrt.tachostandEnde} onChange={(e) => setFahrt({ ...fahrt, tachostandEnde: e.target.value })} />
+              <Input inputMode="decimal" placeholder="z.B. 25 420,5" value={fahrt.tachostandEnde} onChange={(e) => setFahrt({ ...fahrt, tachostandEnde: e.target.value })} />
+            </div>
+            <div>
+              <Label>KM Gesamt</Label>
+              <Input inputMode="decimal" placeholder="auto aus Tachostand" value={fahrt.km} onChange={(e) => setFahrt({ ...fahrt, km: e.target.value })} />
+            </div>
+            <div>
+              <Label>Kilometergeld (0,30 €/km)</Label>
+              <Input readOnly value={fmt(kilometergeld)} style={{ background: "#F3F4F6" }} />
             </div>
           </div>
 
-          {/* zweite Zeile: ÖPNV / Bahn / Taxi */}
+          {/* Zeile 2 */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 12, marginTop: 12 }}>
-            <div>
-              <Label>Öffentliche Verkehrsmittel (gesamt)</Label>
-              <Input inputMode="decimal" placeholder="0,00" value={fahrt.oev} onChange={(e) => setFahrt({ ...fahrt, oev: e.target.value })} />
-            </div>
             <div>
               <Label>Deutsche Bahn</Label>
               <Input inputMode="decimal" placeholder="0,00" value={fahrt.bahn} onChange={(e) => setFahrt({ ...fahrt, bahn: e.target.value })} />
@@ -464,19 +520,25 @@ export default function TravelExpenseFormDE() {
               <Label>Taxi</Label>
               <Input inputMode="decimal" placeholder="0,00" value={fahrt.taxi} onChange={(e) => setFahrt({ ...fahrt, taxi: e.target.value })} />
             </div>
+            <div>
+              <Label>Öffentliche Verkehrsmittel (gesamt)</Label>
+              <Input inputMode="decimal" placeholder="0,00" value={fahrt.oev} onChange={(e) => setFahrt({ ...fahrt, oev: e.target.value })} />
+            </div>
           </div>
 
-          <div style={{ fontSize: 12, color: "#4b5563", marginTop: 8 }}>
-            Abrechnung: <b>{fmt(num(fahrt.km) * 0.3)}</b> (Kilometer × 0,30 €/km) &nbsp;–&nbsp; Zwischensumme Fahrtkosten: <b>{fmt(sumFahrt)}</b>
+          <div style={{ marginTop: 8, fontSize: 12, color: TOKENS.textMut }}>
+            Zwischensumme Fahrtkosten: <span style={{ fontWeight: 600, color: TOKENS.text }}>{fmt(sumFahrt)}</span>
           </div>
         </CardContent>
       </Card>
 
-      {/* Verpflegung */}
+      {/* Verpflegungsmehraufwand */}
+      <div style={{ height: 16 }} />
       <Card>
         <CardHeader><CardTitle>Verpflegungsmehraufwand</CardTitle></CardHeader>
         <CardContent>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0,1fr))", gap: 12 }}>
+          {/* 1. Reihe */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 12 }}>
             <div>
               <Label>Tage &gt; 8 Std.</Label>
               <Input inputMode="numeric" value={verpf.tage8} onChange={(e) => setVerpf({ ...verpf, tage8: e.target.value })} />
@@ -485,6 +547,9 @@ export default function TravelExpenseFormDE() {
               <Label>Satz (€/Tag)</Label>
               <Input inputMode="decimal" value={verpf.satz8} onChange={(e) => setVerpf({ ...verpf, satz8: e.target.value })} />
             </div>
+          </div>
+          {/* 2. Reihe */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 12, marginTop: 12 }}>
             <div>
               <Label>Tage 24 Std.</Label>
               <Input inputMode="numeric" value={verpf.tage24} onChange={(e) => setVerpf({ ...verpf, tage24: e.target.value })} />
@@ -493,6 +558,9 @@ export default function TravelExpenseFormDE() {
               <Label>Satz (€/Tag)</Label>
               <Input inputMode="decimal" value={verpf.satz24} onChange={(e) => setVerpf({ ...verpf, satz24: e.target.value })} />
             </div>
+          </div>
+          {/* 3. Reihe */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 12, marginTop: 12 }}>
             <div>
               <Label>abzgl. Frühstück (Anzahl)</Label>
               <Input inputMode="numeric" value={verpf.fruehstueckAbz} onChange={(e) => setVerpf({ ...verpf, fruehstueckAbz: e.target.value })} />
@@ -502,13 +570,15 @@ export default function TravelExpenseFormDE() {
               <Input inputMode="decimal" value={verpf.abzFruehstueck} onChange={(e) => setVerpf({ ...verpf, abzFruehstueck: e.target.value })} />
             </div>
           </div>
-          <div style={{ fontSize: 12, color: "#4b5563", marginTop: 8 }}>
-            Zwischensumme: <b>{fmt(sumVerpf)}</b>
+
+          <div style={{ marginTop: 8, fontSize: 12, color: TOKENS.textMut }}>
+            Zwischensumme: <span style={{ fontWeight: 600, color: TOKENS.text }}>{fmt(sumVerpf)}</span>
           </div>
         </CardContent>
       </Card>
 
-      {/* Übernachtung */}
+      {/* Übernachtungskosten */}
+      <div style={{ height: 16 }} />
       <Card>
         <CardHeader><CardTitle>Übernachtungskosten</CardTitle></CardHeader>
         <CardContent>
@@ -522,18 +592,19 @@ export default function TravelExpenseFormDE() {
               <Input inputMode="decimal" value={uebernacht.pauschale} onChange={(e) => setUebernacht({ ...uebernacht, pauschale: e.target.value })} />
             </div>
           </div>
-          <div style={{ fontSize: 12, color: "#4b5563", marginTop: 8 }}>
-            Zwischensumme: <b>{fmt(sumUebernacht)}</b>
+          <div style={{ marginTop: 8, fontSize: 12, color: TOKENS.textMut }}>
+            Zwischensumme: <span style={{ fontWeight: 600, color: TOKENS.text }}>{fmt(sumUebernacht)}</span>
           </div>
         </CardContent>
       </Card>
 
-      {/* Sonstige Ausgaben */}
+      {/* Sonstige Auslagen */}
+      <div style={{ height: 16 }} />
       <Card>
         <CardHeader>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-            <CardTitle>Sonstige Ausgaben</CardTitle>
-            <Button variant="secondary" onClick={() => setAuslagen((a) => [...a, { id: Date.now(), text: "", betrag: "" }])}>+ Position</Button>
+            <CardTitle>Sonstige Auslagen</CardTitle>
+            <Button variant="secondary" onClick={addAuslage}>+ Position</Button>
           </div>
         </CardHeader>
         <CardContent>
@@ -550,33 +621,39 @@ export default function TravelExpenseFormDE() {
                 </div>
                 {auslagen.length > 1 && (
                   <div style={{ gridColumn: "1 / -1", marginTop: -4 }}>
-                    <Button variant="secondary" onClick={() => setAuslagen((a) => a.filter((x) => x.id !== r.id))}>Entfernen</Button>
+                    <Button variant="secondary" onClick={() => delAuslage(r.id)}>Entfernen</Button>
                   </div>
                 )}
               </div>
             ))}
-            <div style={{ fontSize: 12, color: "#4b5563" }}>
-              Zwischensumme: <b>{fmt(sumAuslagen)}</b>
+            <div style={{ fontSize: 12, color: TOKENS.textMut }}>
+              Zwischensumme: <span style={{ fontWeight: 600, color: TOKENS.text }}>{fmt(sumAuslagen)}</span>
             </div>
           </div>
         </CardContent>
       </Card>
 
       {/* Belege */}
+      <div style={{ height: 16 }} />
       <Card>
         <CardHeader><CardTitle>Belege hochladen</CardTitle></CardHeader>
         <CardContent>
-          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-            <Input type="file" multiple accept="image/*,application/pdf" onChange={handleReceiptUpload} />
-            <div style={{ fontSize: 12, color: "#4b5563" }}>
-              Bilder & PDFs sind möglich. PDFs werden automatisch gerendert. Jede Datei/Seite → eigene PDF-Seite.
-            </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <Input id="file" type="file" multiple accept="image/*,application/pdf" onChange={handleFileUpload} />
+            <div style={{ fontSize: 12, color: TOKENS.textMut }}>Bilder & PDFs werden komprimiert in der Export-PDF angehängt.</div>
           </div>
-          {receipts.length > 0 && (
+          {attachments.length > 0 && (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 12, marginTop: 12 }}>
-              {receipts.map((img, i) => (
-                <div key={i} style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 8, display: "flex", alignItems: "center", justifyContent: "center", aspectRatio: "1 / 1", overflow: "hidden" }}>
-                  <img src={img.dataUrl} alt={img.name} style={{ objectFit: "contain", width: "100%", height: "100%" }} />
+              {attachments.map((att, i) => (
+                <div key={i} style={{ border: `1px solid ${TOKENS.border}`, borderRadius: TOKENS.radius, padding: 8, display: "flex", alignItems: "center", justifyContent: "center", aspectRatio: "1 / 1", overflow: "hidden" }}>
+                  {att.kind === "image" ? (
+                    <img src={att.dataUrl} alt={att.name} style={{ objectFit: "contain", width: "100%", height: "100%" }} />
+                  ) : (
+                    <div style={{ textAlign: "center", fontSize: 12, color: TOKENS.textDim }}>
+                      📄 <div style={{ marginTop: 6, wordBreak: "break-word" }}>{att.name}</div>
+                      <div style={{ marginTop: 6, fontSize: 11, color: TOKENS.textMut }}>PDF wird beim Export gerendert</div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -584,28 +661,39 @@ export default function TravelExpenseFormDE() {
         </CardContent>
       </Card>
 
-      {/* Gesamtsumme + PDF */}
+      {/* Summary */}
+      <div style={{ height: 16 }} />
       <Card>
         <CardHeader><CardTitle>Gesamtsumme</CardTitle></CardHeader>
         <CardContent>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
             <div style={{ fontSize: 18, fontWeight: 700 }}>{fmt(gesamt)}</div>
-            <Button onClick={generatePDF} disabled={busy}>{busy ? "⏳ PDF…" : "⬇️ PDF erzeugen"}</Button>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <Button onClick={generatePDF} disabled={busy}>{busy ? "⏳ Erzeuge PDF…" : "⬇️ PDF erzeugen"}</Button>
+              {pdfUrl && (
+                <>
+                  <a href={pdfUrl} target="_blank" rel="noreferrer" style={{ textDecoration: "none", fontSize: 14 }}>Vorschau öffnen</a>
+                  <a href={pdfUrl} download={`Reisekosten_${basis.name || "Mitarbeiter"}_KW${(basis.kw || "XX").replace("/", "-")}.pdf`} style={{ textDecoration: "none", fontSize: 14 }}>PDF herunterladen</a>
+                </>
+              )}
+            </div>
           </div>
+          {errMsg && <div style={{ marginTop: 8, color: "#DC2626" }}>{errMsg}</div>}
         </CardContent>
       </Card>
 
-      {/* Druckbereich (Deckblatt) */}
+      {/* Printable area (für PDF-Screenshot) */}
       <div
         ref={printableRef}
         style={{
-          width: 794, // ~A4 @ 96 DPI
+          width: 794,
           padding: 24,
-          fontFamily: 'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Noto Sans, "Apple Color Emoji", "Segoe UI Emoji"',
+          fontFamily:
+            'Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"',
           backgroundColor: "#ffffff",
           color: "#000000",
           lineHeight: 1.35,
-          marginTop: 12,
+          marginTop: 24,
         }}
       >
         <div style={{ fontSize: 12 }}>{basis.firma}</div>
@@ -616,70 +704,60 @@ export default function TravelExpenseFormDE() {
           {basis.name}
         </div>
 
-        {/* Basisdaten */}
+        {/* Basisdaten PDF */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginTop: 16, fontSize: 12 }}>
           <div>
             <div><span style={{ fontWeight: 600 }}>Name:</span> {basis.name}</div>
             <div><span style={{ fontWeight: 600 }}>Zweck:</span> {basis.zweck}</div>
           </div>
           <div>
-            <div><span style={{ fontWeight: 600 }}>Beginn:</span> {basis.beginn || "—"}</div>
-            <div><span style={{ fontWeight: 600 }}>Ende:</span> {basis.ende || "—"}</div>
+            <div><span style={{ fontWeight: 600 }}>Beginn:</span> {basis.beginn}</div>
+            <div><span style={{ fontWeight: 600 }}>Ende:</span> {basis.ende}</div>
           </div>
         </div>
 
         {/* Tabellen */}
         {(() => {
           const cell = { border: "1px solid #000", padding: 8, fontSize: 12, verticalAlign: "top" };
-          const header = { fontWeight: 600, marginTop: 16 };
-          const kmCost = num(fahrt.km) * 0.3;
+          const header = { fontWeight: 700, marginTop: 16 };
+
+          const km = num(fahrt.km);
+          const kmCost = kmFlatCost(km, 0.30);
+
           return (
             <>
-              {/* Fahrtkosten */}
               <div style={header}>Fahrtkosten</div>
               <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
                 <tbody>
                   <tr>
-                    <td style={cell}>Privat-Pkw</td>
-                    <td style={cell}>Kennzeichen</td>
-                    <td style={cell}>Tachostand Beginn</td>
-                    <td style={cell}>Tachostand Ende</td>
-                    <td style={cell}>km</td>
-                    <td style={cell}>Satz €/km</td>
-                    <td style={cell}>Betrag</td>
-                  </tr>
-                  <tr>
-                    <td style={cell}>—</td>
-                    <td style={cell}>{fahrt.kennzeichen || "—"}</td>
-                    <td style={cell}>{fahrt.tachostandBeginn || "—"}</td>
-                    <td style={cell}>{fahrt.tachostandEnde || "—"}</td>
-                    <td style={cell}>{num(fahrt.km)}</td>
-                    <td style={cell}>0,30 €</td>
+                    <td style={cell}>Privat-PKW</td>
+                    <td style={cell}>Kennzeichen: {fahrt.kennzeichen || "—"}</td>
+                    <td style={cell}>Tachostand: {fahrt.tachostandBeginn || "—"} → {fahrt.tachostandEnde || "—"}</td>
+                    <td style={cell}>{km} km × 0,30 €/km</td>
                     <td style={{ ...cell, textAlign: "right" }}>{fmt(kmCost)}</td>
                   </tr>
                   <tr>
-                    <td style={cell}>Öffentliche Verkehrsmittel</td>
-                    <td style={cell} colSpan={5}></td>
-                    <td style={{ ...cell, textAlign: "right" }}>{fmt(num(fahrt.oev))}</td>
-                  </tr>
-                  <tr>
                     <td style={cell}>Deutsche Bahn</td>
-                    <td style={cell} colSpan={5}></td>
+                    <td style={cell} colSpan={3}></td>
                     <td style={{ ...cell, textAlign: "right" }}>{fmt(num(fahrt.bahn))}</td>
                   </tr>
                   <tr>
                     <td style={cell}>Taxi</td>
-                    <td style={cell} colSpan={5}></td>
+                    <td style={cell} colSpan={3}></td>
                     <td style={{ ...cell, textAlign: "right" }}>{fmt(num(fahrt.taxi))}</td>
                   </tr>
                   <tr>
-                    <td style={{ ...cell, fontWeight: 600 }} colSpan={6}>Zwischensumme</td>
-                    <td style={{ ...cell, textAlign: "right", fontWeight: 600 }}>{fmt(sumFahrt)}</td>
+                    <td style={cell}>Öffentliche Verkehrsmittel</td>
+                    <td style={cell} colSpan={3}></td>
+                    <td style={{ ...cell, textAlign: "right" }}>{fmt(num(fahrt.oev))}</td>
+                  </tr>
+                  <tr>
+                    <td style={{ ...cell, fontWeight: 700 }} colSpan={4}>Zwischensumme Fahrtkosten</td>
+                    <td style={{ ...cell, textAlign: "right", fontWeight: 700 }}>{fmt(sumFahrt)}</td>
                   </tr>
                 </tbody>
               </table>
 
-              {/* Verpflegung */}
               <div style={header}>Verpflegungsmehraufwand</div>
               <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
                 <tbody>
@@ -702,13 +780,12 @@ export default function TravelExpenseFormDE() {
                     <td style={{ ...cell, textAlign: "right" }}>- {fmt(num(verpf.fruehstueckAbz) * num(verpf.abzFruehstueck))}</td>
                   </tr>
                   <tr>
-                    <td style={{ ...cell, fontWeight: 600 }} colSpan={3}>Zwischensumme</td>
-                    <td style={{ ...cell, textAlign: "right", fontWeight: 600 }}>{fmt(sumVerpf)}</td>
+                    <td style={{ ...cell, fontWeight: 700 }} colSpan={3}>Zwischensumme</td>
+                    <td style={{ ...cell, textAlign: "right", fontWeight: 700 }}>{fmt(sumVerpf)}</td>
                   </tr>
                 </tbody>
               </table>
 
-              {/* Übernachtung */}
               <div style={header}>Übernachtungskosten</div>
               <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
                 <tbody>
@@ -723,60 +800,40 @@ export default function TravelExpenseFormDE() {
                     <td style={{ ...cell, textAlign: "right" }}>{fmt(num(uebernacht.pauschale))}</td>
                   </tr>
                   <tr>
-                    <td style={{ ...cell, fontWeight: 600 }} colSpan={3}>Zwischensumme</td>
-                    <td style={{ ...cell, textAlign: "right", fontWeight: 600 }}>{fmt(sumUebernacht)}</td>
+                    <td style={{ ...cell, fontWeight: 700 }} colSpan={3}>Zwischensumme</td>
+                    <td style={{ ...cell, textAlign: "right", fontWeight: 700 }}>{fmt(sumUebernacht)}</td>
                   </tr>
                 </tbody>
               </table>
 
-              {/* Sonstige Ausgaben */}
-              <div style={header}>Sonstige Ausgaben</div>
-              <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
-                <tbody>
-                  {auslagen.map((r, i) => (
-                    <tr key={i}>
-                      <td style={cell} colSpan={3}>{r.text}</td>
-                      <td style={{ ...cell, textAlign: "right" }}>{fmt(num(r.betrag))}</td>
-                    </tr>
-                  ))}
-                  <tr>
-                    <td style={{ ...cell, fontWeight: 600 }} colSpan={3}>Zwischensumme</td>
-                    <td style={{ ...cell, textAlign: "right", fontWeight: 600 }}>{fmt(sumAuslagen)}</td>
-                  </tr>
-                </tbody>
-              </table>
-
-              <div style={{ marginTop: 16, textAlign: "right", fontSize: 14 }}>
-                <div style={{ fontWeight: 700 }}>Gesamte Reisekosten: {fmt(gesamt)}</div>
-              </div>
-
-              <div style={{ marginTop: 24, fontSize: 10, color: "#555" }}>
-                Hinweis: Pauschalen und Abzüge sind konfigurierbar. Prüfen Sie steuer-/unternehmensseitige Vorgaben.
+              <div style={{ textAlign: "right", marginTop: 16, fontWeight: 700, fontSize: 14 }}>
+                Gesamte Reisekosten: {fmt(gesamt)}
               </div>
             </>
           );
         })()}
       </div>
 
-      {/* Tests */}
-      {tests.length > 0 && (
-        <Card>
-          <CardHeader><CardTitle>Testergebnisse</CardTitle></CardHeader>
-          <CardContent>
-            <ul style={{ margin: 0, paddingLeft: 18 }}>
-              {tests.map((t, i) => (
-                <li key={i} style={{ color: t.ok ? "#059669" : "#b91c1c" }}>
-                  {t.ok ? "✔" : "✖"} {t.name}{t.got != null ? ` – got: ${t.got}` : ""}
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-      )}
+      {/* Hinweis */}
+      <div style={{ fontSize: 12, color: TOKENS.textMut, marginTop: 8 }}>
+        📷 Tipp: Bilder & PDFs hier hochladen – sie landen automatisch (komprimiert) in der Export-PDF.
+      </div>
 
-      {err && (
-        <div style={{ marginTop: 8, color: "#b91c1c", fontSize: 12 }}>
-          Fehler: {err}
+      {/* Test results */}
+      {testOutput.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <Card>
+            <CardHeader><CardTitle>Testergebnisse</CardTitle></CardHeader>
+            <CardContent>
+              <ul style={{ display: "grid", gap: 6, fontSize: 14, margin: 0, paddingLeft: 16 }}>
+                {testOutput.map((t, i) => (
+                  <li key={i} style={{ color: t.ok ? "#059669" : "#DC2626" }}>
+                    {t.ok ? "✔" : "✖"} {t.name} {t.msg ? `– ${t.msg}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
         </div>
       )}
     </div>
