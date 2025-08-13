@@ -4,15 +4,11 @@ import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
 
 /**
- * Features:
- * - 0,30 €/km (keine Staffel), KM aus Tachostand
- * - Upload via Datei-Dialog + Drag&Drop (Bilder & PDFs), Entfernen-Button
- * - PDF-Export:
- *    - Formular als komprimiertes JPEG
- *    - Anhänge: 1 Seite pro Bild/PDF-Seite, automatisch Portrait/Landscape, A4
- *    - Logo oben rechts auf allen Seiten
- *    - Einheitliche 5-Spalten-Tabellen, rechtsbündige Beträge
- * - pdf.js: lokal (public/pdfjs/*) mit CDN-Fallback
+ * Fixes:
+ * - Logo wird nicht mehr im HTML gerendert (kein doppeltes Logo in PDF)
+ * - Logo erscheint nur auf der ersten PDF-Seite
+ * - Symmetrische, größere Seitenabstände links/rechts (Container + CardContent)
+ * - (Rest wie zuvor: 0,30 €/km, Drag&Drop, PDF-Anhänge seitenfüllend A4, gleiche Betrags-Spaltenbreite, etc.)
  */
 
 // --------- Design Tokens ----------
@@ -74,7 +70,7 @@ const CardTitle = ({ children }) => (
 );
 
 const CardContent = ({ children }) => (
-  <div style={{ padding: 20, display: "grid", gap: 24 }}>{children}</div>
+  <div style={{ padding: "24px", display: "grid", gap: 24 }}>{children}</div> // <-- mehr Innenabstand
 );
 
 const Button = ({ children, onClick, variant = "primary", style, disabled, title, ariaLabel }) => {
@@ -464,8 +460,10 @@ export default function TravelExpenseFormDE() {
       const imgMain = canvas.toDataURL("image/jpeg", JPG_QUALITY_MAIN);
       pdf.addImage(imgMain, "JPEG", (pageW - w) / 2, margin, w, h, undefined, "FAST");
 
-      // Logo oben rechts auf der Hauptseite
-      if (logoImg) pdf.addImage(logoImg, "PNG", pageW - margin - LOGO_W, margin, LOGO_W, LOGO_H);
+      // Logo nur auf der ERSTEN Seite
+      if (logoImg) {
+        pdf.addImage(logoImg, "PNG", pageW - margin - LOGO_W, margin, LOGO_W, LOGO_H);
+      }
 
       // ---- Anhänge (A4, 1 pro Seite, Orientierung je Seite) ----
       const allImages = [];
@@ -498,7 +496,7 @@ export default function TravelExpenseFormDE() {
         }
       }
 
-      // 3) Einfügen: je Bild eine A4-Seite, Orientierung passend + Logo
+      // 3) Einfügen: je Bild eine A4-Seite, Orientierung passend (KEIN Logo mehr auf Folgeseiten)
       for (let i = 0; i < allImages.length; i++) {
         const { dataUrl, name } = allImages[i];
 
@@ -526,8 +524,7 @@ export default function TravelExpenseFormDE() {
 
         pdf.addImage(dataUrl, "JPEG", x, y, drawW, drawH, undefined, "FAST");
 
-        if (logoImg) pdf.addImage(logoImg, "PNG", curW - m - LOGO_W, m, LOGO_W, LOGO_H);
-
+        // kein Logo auf den Anhangsseiten
         pdf.setFontSize(9);
         pdf.text(name || "Anhang", m, curH - m / 2);
       }
@@ -583,11 +580,13 @@ export default function TravelExpenseFormDE() {
       style={{
         maxWidth: 1100,
         margin: "0 auto",
-        padding: `${containerPadding}px`,
+        paddingInline: containerPadding, // <-- symmetrisch links & rechts
+        paddingBlock: containerPadding,
         fontFamily:
           'Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"',
         color: TOKENS.text,
         background: TOKENS.bgApp,
+        boxSizing: "border-box",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 20 }}>
@@ -836,7 +835,7 @@ export default function TravelExpenseFormDE() {
               border: `2px dashed ${isDragging ? TOKENS.focus : TOKENS.border}`,
               background: isDragging ? "rgba(37,99,235,0.06)" : "#fff",
               borderRadius: TOKENS.radius,
-              padding: 20,
+              padding: 24,
               textAlign: "center",
               color: TOKENS.textDim,
               transition: "all .15s ease",
@@ -945,7 +944,7 @@ export default function TravelExpenseFormDE() {
           marginTop: 24,
         }}
       >
-        {/* Kopfbereich */}
+        {/* Kopfbereich – Logo NICHT mehr rendern (damit es nicht doppelt im PDF ist) */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
             <div style={{ fontSize: 12 }}>{basis.firma}</div>
@@ -956,8 +955,8 @@ export default function TravelExpenseFormDE() {
               {basis.name}
             </div>
           </div>
-          {/* Platzhalter fürs Logo im HTML-Preview (PDF setzt Logo separat über jsPDF) */}
-          <img src={LOGO_SRC} alt="" style={{ height: 28, opacity: 0.8 }} />
+          {/* (bewusst leer gelassen) */}
+          <div style={{ width: 90, height: 28 }} />
         </div>
 
         {/* Basisdaten PDF */}
@@ -972,12 +971,12 @@ export default function TravelExpenseFormDE() {
           </div>
         </div>
 
-        {/* Tabellen – 5-Spalten-Raster, letzte Spalte = Beträge (rechtsbündig, feste Breite) */}
+        {/* Tabellen – 5-Spalten-Raster, letzte Spalte = Beträge (rechtsbündig, fixe Breite) */}
         {(() => {
           const cell = { border: "1px solid #000", padding: 8, fontSize: 12, verticalAlign: "top" };
           const header = { fontWeight: 700, marginTop: 16 };
-          const amtCell = { ...cell, textAlign: "right", width: 110 }; // feste Breite für Beträge
-          const textCell = { ...cell }; // restliche Zellen
+          const amtCell = { ...cell, textAlign: "right", width: 110 };
+          const textCell = { ...cell };
 
           const km = num(fahrt.km);
           const kmCost = kmFlatCost(km, 0.30);
