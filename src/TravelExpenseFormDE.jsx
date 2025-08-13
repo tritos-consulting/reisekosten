@@ -6,14 +6,13 @@ import html2canvas from "html2canvas";
 /**
  * Features:
  * - 0,30 €/km (keine Staffel), KM aus Tachostand
- * - Responsive Layout, großzügige Abstände
- * - Upload: Bilder & PDFs (Datei-Dialog + Drag&Drop), Entfernen-Button pro Beleg
+ * - Upload via Datei-Dialog + Drag&Drop (Bilder & PDFs), Entfernen-Button
  * - PDF-Export:
  *    - Formular als komprimiertes JPEG
  *    - Anhänge: 1 Seite pro Bild/PDF-Seite, automatisch Portrait/Landscape, A4
- *    - Runterskalieren & JPEG-Qualität für kleine Dateigröße
+ *    - Logo oben rechts auf allen Seiten
+ *    - Einheitliche 5-Spalten-Tabellen, rechtsbündige Beträge
  * - pdf.js: lokal (public/pdfjs/*) mit CDN-Fallback
- * - PDF enthält: Fahrtkosten, Verpflegung, Übernachtung, Auslagen
  */
 
 // --------- Design Tokens ----------
@@ -181,11 +180,15 @@ function kmFlatCost(km, rate = 0.30) {
   return k * rate;
 }
 
-// --- PDF/A4 Konstanten & Kompression ---
-const A4 = { wPt: 595.28, hPt: 841.89 }; // A4 in pt (jsPDF)
-const TARGET_IMG_PX = 1360;               // Zielbreite zum Downscaling
-const JPG_QUALITY_MAIN = 0.78;            // Formular-Screenshot
-const JPG_QUALITY_ATTACH = 0.72;          // Anhänge
+// --- Kompression & A4-Export ---
+const TARGET_IMG_PX = 1360;     // Zielbreite fürs Downscaling
+const JPG_QUALITY_MAIN = 0.78;  // Formular
+const JPG_QUALITY_ATTACH = 0.72;// Anhänge
+
+// Logo (liegt in /public/logo.png)
+const LOGO_SRC = "logo.png";
+const LOGO_W = 90;  // pt
+const LOGO_H = 28;  // pt
 
 async function downscaleImage(dataUrl, targetWidthPx = TARGET_IMG_PX, quality = JPG_QUALITY_ATTACH) {
   return new Promise((resolve) => {
@@ -207,7 +210,7 @@ async function downscaleImage(dataUrl, targetWidthPx = TARGET_IMG_PX, quality = 
   });
 }
 
-// --------- pdf.js Loader: zuerst LOKAL, dann (optional) CDN ---------
+// --------- pdf.js Loader: lokal, dann CDN ---------
 const PDFJS_VERSION = "3.11.174";
 const PDFJS_CANDIDATES = [
   { lib: "pdfjs/pdf.min.js", worker: "pdfjs/pdf.worker.min.js" },
@@ -365,7 +368,6 @@ export default function TravelExpenseFormDE() {
   const onDragLeave = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    // nur zurücksetzen, wenn wir wirklich die Dropzone verlassen
     if (dropRef.current && !dropRef.current.contains(e.relatedTarget)) {
       setIsDragging(false);
     }
@@ -387,8 +389,6 @@ export default function TravelExpenseFormDE() {
 
     for (let p = 1; p <= pdf.numPages; p++) {
       const page = await pdf.getPage(p);
-
-      // Zielbreite in Pixel -> Höhe über Seitenverhältnis
       const vp1 = page.getViewport({ scale: 1 });
       const aspect = vp1.height / vp1.width;
       const targetW = TARGET_IMG_PX;
@@ -442,11 +442,19 @@ export default function TravelExpenseFormDE() {
 
       Object.assign(node.style, prev);
 
+      // Logo laden
+      const logoImg = await new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => resolve(null);
+        img.src = LOGO_SRC;
+      });
+
       const pdf = new jsPDF({ unit: "pt", format: "a4", compress: true });
 
       // Hauptseite einpassen (A4 mit Rand)
-      const pageW = pdf.internal.pageSize.getWidth();   // ~595
-      const pageH = pdf.internal.pageSize.getHeight();  // ~842
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
       const margin = 24;
       const innerW = pageW - margin * 2;
       const innerH = pageH - margin * 2;
@@ -455,6 +463,9 @@ export default function TravelExpenseFormDE() {
       const h = canvas.height * ratio;
       const imgMain = canvas.toDataURL("image/jpeg", JPG_QUALITY_MAIN);
       pdf.addImage(imgMain, "JPEG", (pageW - w) / 2, margin, w, h, undefined, "FAST");
+
+      // Logo oben rechts auf der Hauptseite
+      if (logoImg) pdf.addImage(logoImg, "PNG", pageW - margin - LOGO_W, margin, LOGO_W, LOGO_H);
 
       // ---- Anhänge (A4, 1 pro Seite, Orientierung je Seite) ----
       const allImages = [];
@@ -487,27 +498,22 @@ export default function TravelExpenseFormDE() {
         }
       }
 
-      // 3) Einfügen: je Bild eine A4-Seite, Orientierung passend
+      // 3) Einfügen: je Bild eine A4-Seite, Orientierung passend + Logo
       for (let i = 0; i < allImages.length; i++) {
         const { dataUrl, name } = allImages[i];
 
-        // Bildmaße ermitteln (für Orientierung & Fit)
         const dim = await new Promise((resolve) => {
           const image = new Image();
           image.onload = () => resolve({ w: image.width, h: image.height });
           image.src = dataUrl;
         });
 
-        const imgRatio = dim.h / dim.w;
-        const isLandscape = imgRatio < 1; // breiter als hoch?
-
-        // neue Seite hinzufügen (erste ist schon belegt)
+        const isLandscape = dim.h / dim.w < 1;
         pdf.addPage("a4", isLandscape ? "landscape" : "portrait");
 
         const curW = pdf.internal.pageSize.getWidth();
         const curH = pdf.internal.pageSize.getHeight();
 
-        // Rand und maximal einpassen
         const m = 20;
         const maxW = curW - m * 2;
         const maxH = curH - m * 2;
@@ -520,7 +526,8 @@ export default function TravelExpenseFormDE() {
 
         pdf.addImage(dataUrl, "JPEG", x, y, drawW, drawH, undefined, "FAST");
 
-        // kleine Beschriftung unten links (optional)
+        if (logoImg) pdf.addImage(logoImg, "PNG", curW - m - LOGO_W, m, LOGO_W, LOGO_H);
+
         pdf.setFontSize(9);
         pdf.text(name || "Anhang", m, curH - m / 2);
       }
@@ -534,12 +541,8 @@ export default function TravelExpenseFormDE() {
       const url = URL.createObjectURL(blob);
       setPdfUrl(url);
 
-      // Nur wenn beim Rendern von PDF-Anhängen etwas scheiterte: Hinweis
-      if (pdfRenderFailed) {
-        setErrMsg("Hinweis: Mindestens ein PDF-Anhang konnte nicht gerendert werden. Bilder wurden dennoch exportiert.");
-      } else {
-        setErrMsg("");
-      }
+      if (pdfRenderFailed) setErrMsg("Hinweis: Mindestens ein PDF-Anhang konnte nicht gerendert werden. Bilder wurden dennoch exportiert.");
+      else setErrMsg("");
 
       setBusy(false);
     } catch (err) {
@@ -942,12 +945,19 @@ export default function TravelExpenseFormDE() {
           marginTop: 24,
         }}
       >
-        <div style={{ fontSize: 12 }}>{basis.firma}</div>
-        <div style={{ fontSize: 20, fontWeight: 700, marginTop: 8 }}>Reisekostenabrechnung</div>
-        <div style={{ marginTop: 4, fontSize: 12 }}>
-          {basis.kw ? `KW ${basis.kw}` : null}
-          {basis.kw && (basis.name || basis.beginn || basis.ende) ? " – " : null}
-          {basis.name}
+        {/* Kopfbereich */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <div style={{ fontSize: 12 }}>{basis.firma}</div>
+            <div style={{ fontSize: 20, fontWeight: 700, marginTop: 8 }}>Reisekostenabrechnung</div>
+            <div style={{ marginTop: 4, fontSize: 12 }}>
+              {basis.kw ? `KW ${basis.kw}` : null}
+              {basis.kw && (basis.name || basis.beginn || basis.ende) ? " – " : null}
+              {basis.name}
+            </div>
+          </div>
+          {/* Platzhalter fürs Logo im HTML-Preview (PDF setzt Logo separat über jsPDF) */}
+          <img src={LOGO_SRC} alt="" style={{ height: 28, opacity: 0.8 }} />
         </div>
 
         {/* Basisdaten PDF */}
@@ -962,10 +972,12 @@ export default function TravelExpenseFormDE() {
           </div>
         </div>
 
-        {/* Tabellen */}
+        {/* Tabellen – 5-Spalten-Raster, letzte Spalte = Beträge (rechtsbündig, feste Breite) */}
         {(() => {
           const cell = { border: "1px solid #000", padding: 8, fontSize: 12, verticalAlign: "top" };
           const header = { fontWeight: 700, marginTop: 16 };
+          const amtCell = { ...cell, textAlign: "right", width: 110 }; // feste Breite für Beträge
+          const textCell = { ...cell }; // restliche Zellen
 
           const km = num(fahrt.km);
           const kmCost = kmFlatCost(km, 0.30);
@@ -974,107 +986,138 @@ export default function TravelExpenseFormDE() {
             <>
               {/* Fahrtkosten */}
               <div style={header}>Fahrtkosten</div>
-              <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8, tableLayout: "fixed" }}>
+                <colgroup>
+                  <col />
+                  <col />
+                  <col />
+                  <col />
+                  <col style={{ width: 110 }} />
+                </colgroup>
                 <tbody>
                   <tr>
-                    <td style={cell}>Privat-PKW</td>
-                    <td style={cell}>Kennzeichen: {fahrt.kennzeichen || "—"}</td>
-                    <td style={cell}>Tachostand: {fahrt.tachostandBeginn || "—"} → {fahrt.tachostandEnde || "—"}</td>
-                    <td style={cell}>{km} km × 0,30 €/km</td>
-                    <td style={{ ...cell, textAlign: "right" }}>{fmt(kmCost)}</td>
+                    <td style={textCell}>Privat-PKW</td>
+                    <td style={textCell}>Kennzeichen: {fahrt.kennzeichen || "—"}</td>
+                    <td style={textCell}>Tachostand: {fahrt.tachostandBeginn || "—"} → {fahrt.tachostandEnde || "—"}</td>
+                    <td style={textCell}>{km} km × 0,30 €/km</td>
+                    <td style={amtCell}>{fmt(kmCost)}</td>
                   </tr>
                   <tr>
-                    <td style={cell}>Deutsche Bahn</td>
-                    <td style={cell} colSpan={3}></td>
-                    <td style={{ ...cell, textAlign: "right" }}>{fmt(num(fahrt.bahn))}</td>
+                    <td style={textCell}>Deutsche Bahn</td>
+                    <td style={textCell} colSpan={3}></td>
+                    <td style={amtCell}>{fmt(num(fahrt.bahn))}</td>
                   </tr>
                   <tr>
-                    <td style={cell}>Taxi</td>
-                    <td style={cell} colSpan={3}></td>
-                    <td style={{ ...cell, textAlign: "right" }}>{fmt(num(fahrt.taxi))}</td>
+                    <td style={textCell}>Taxi</td>
+                    <td style={textCell} colSpan={3}></td>
+                    <td style={amtCell}>{fmt(num(fahrt.taxi))}</td>
                   </tr>
                   <tr>
-                    <td style={cell}>Öffentliche Verkehrsmittel</td>
-                    <td style={cell} colSpan={3}></td>
-                    <td style={{ ...cell, textAlign: "right" }}>{fmt(num(fahrt.oev))}</td>
+                    <td style={textCell}>Öffentliche Verkehrsmittel</td>
+                    <td style={textCell} colSpan={3}></td>
+                    <td style={amtCell}>{fmt(num(fahrt.oev))}</td>
                   </tr>
                   <tr>
-                    <td style={{ ...cell, fontWeight: 700 }} colSpan={4}>Zwischensumme Fahrtkosten</td>
-                    <td style={{ ...cell, textAlign: "right", fontWeight: 700 }}>{fmt(sumFahrt)}</td>
+                    <td style={{ ...textCell, fontWeight: 700 }} colSpan={4}>Zwischensumme Fahrtkosten</td>
+                    <td style={{ ...amtCell, fontWeight: 700 }}>{fmt(sumFahrt)}</td>
                   </tr>
                 </tbody>
               </table>
 
-                {/* Verpflegung */}
-                <div style={header}>Verpflegungsmehraufwand</div>
-                <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
-                  <tbody>
-                    <tr>
-                      <td style={cell}>Tage &gt; 8 Std.</td>
-                      <td style={cell}>{verpf.tage8}</td>
-                      <td style={cell}>Satz {fmt(num(verpf.satz8))}</td>
-                      <td style={{ ...cell, textAlign: "right" }}>{fmt(num(verpf.tage8) * num(verpf.satz8))}</td>
-                    </tr>
-                    <tr>
-                      <td style={cell}>Tage 24 Std.</td>
-                      <td style={cell}>{verpf.tage24}</td>
-                      <td style={cell}>Satz {fmt(num(verpf.satz24))}</td>
-                      <td style={{ ...cell, textAlign: "right" }}>{fmt(num(verpf.tage24) * num(verpf.satz24))}</td>
-                    </tr>
-                    <tr>
-                      <td style={cell}>abzgl. Frühstück</td>
-                      <td style={cell}>{verpf.fruehstueckAbz}</td>
-                      <td style={cell}>{fmt(num(verpf.abzFruehstueck))} pro Frühstück</td>
-                      <td style={{ ...cell, textAlign: "right" }}>- {fmt(num(verpf.fruehstueckAbz) * num(verpf.abzFruehstueck))}</td>
-                    </tr>
-                    <tr>
-                      <td style={{ ...cell, fontWeight: 700 }} colSpan={3}>Zwischensumme</td>
-                      <td style={{ ...cell, textAlign: "right", fontWeight: 700 }}>{fmt(sumVerpf)}</td>
-                    </tr>
-                  </tbody>
-                </table>
+              {/* Verpflegung */}
+              <div style={header}>Verpflegungsmehraufwand</div>
+              <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8, tableLayout: "fixed" }}>
+                <colgroup>
+                  <col />
+                  <col />
+                  <col />
+                  <col />
+                  <col style={{ width: 110 }} />
+                </colgroup>
+                <tbody>
+                  <tr>
+                    <td style={textCell}>Tage &gt; 8 Std.</td>
+                    <td style={textCell}>{verpf.tage8}</td>
+                    <td style={textCell}>Satz {fmt(num(verpf.satz8))}</td>
+                    <td style={textCell}></td>
+                    <td style={amtCell}>{fmt(num(verpf.tage8) * num(verpf.satz8))}</td>
+                  </tr>
+                  <tr>
+                    <td style={textCell}>Tage 24 Std.</td>
+                    <td style={textCell}>{verpf.tage24}</td>
+                    <td style={textCell}>Satz {fmt(num(verpf.satz24))}</td>
+                    <td style={textCell}></td>
+                    <td style={amtCell}>{fmt(num(verpf.tage24) * num(verpf.satz24))}</td>
+                  </tr>
+                  <tr>
+                    <td style={textCell}>abzgl. Frühstück</td>
+                    <td style={textCell}>{verpf.fruehstueckAbz}</td>
+                    <td style={textCell}>{fmt(num(verpf.abzFruehstueck))} pro Frühstück</td>
+                    <td style={textCell}></td>
+                    <td style={amtCell}>- {fmt(num(verpf.fruehstueckAbz) * num(verpf.abzFruehstueck))}</td>
+                  </tr>
+                  <tr>
+                    <td style={{ ...textCell, fontWeight: 700 }} colSpan={4}>Zwischensumme</td>
+                    <td style={{ ...amtCell, fontWeight: 700 }}>{fmt(sumVerpf)}</td>
+                  </tr>
+                </tbody>
+              </table>
 
-                {/* Übernachtung */}
-                <div style={header}>Übernachtungskosten</div>
-                <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
-                  <tbody>
-                    <tr>
-                      <td style={cell}>Tatsächliche Kosten (ohne Verpflegung)</td>
-                      <td style={cell} colSpan={2}></td>
-                      <td style={{ ...cell, textAlign: "right" }}>{fmt(num(uebernacht.tatsaechlich))}</td>
-                    </tr>
-                    <tr>
-                      <td style={cell}>Pauschale</td>
-                      <td style={cell} colSpan={2}></td>
-                      <td style={{ ...cell, textAlign: "right" }}>{fmt(num(uebernacht.pauschale))}</td>
-                    </tr>
-                    <tr>
-                      <td style={{ ...cell, fontWeight: 700 }} colSpan={3}>Zwischensumme</td>
-                      <td style={{ ...cell, textAlign: "right", fontWeight: 700 }}>{fmt(sumUebernacht)}</td>
-                    </tr>
-                  </tbody>
-                </table>
+              {/* Übernachtung */}
+              <div style={header}>Übernachtungskosten</div>
+              <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8, tableLayout: "fixed" }}>
+                <colgroup>
+                  <col />
+                  <col />
+                  <col />
+                  <col />
+                  <col style={{ width: 110 }} />
+                </colgroup>
+                <tbody>
+                  <tr>
+                    <td style={textCell}>Tatsächliche Kosten (ohne Verpflegung)</td>
+                    <td style={textCell} colSpan={3}></td>
+                    <td style={amtCell}>{fmt(num(uebernacht.tatsaechlich))}</td>
+                  </tr>
+                  <tr>
+                    <td style={textCell}>Pauschale</td>
+                    <td style={textCell} colSpan={3}></td>
+                    <td style={amtCell}>{fmt(num(uebernacht.pauschale))}</td>
+                  </tr>
+                  <tr>
+                    <td style={{ ...textCell, fontWeight: 700 }} colSpan={4}>Zwischensumme</td>
+                    <td style={{ ...amtCell, fontWeight: 700 }}>{fmt(sumUebernacht)}</td>
+                  </tr>
+                </tbody>
+              </table>
 
-                {/* Auslagen */}
-                <div style={header}>Sonstige Auslagen</div>
-                <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
-                  <tbody>
-                    {auslagen.map((r, i) => (
-                      <tr key={i}>
-                        <td style={cell} colSpan={3}>{r.text || "—"}</td>
-                        <td style={{ ...cell, textAlign: "right" }}>{fmt(num(r.betrag))}</td>
-                      </tr>
-                    ))}
-                    <tr>
-                      <td style={{ ...cell, fontWeight: 700 }} colSpan={3}>Zwischensumme</td>
-                      <td style={{ ...cell, textAlign: "right", fontWeight: 700 }}>{fmt(sumAuslagen)}</td>
+              {/* Auslagen */}
+              <div style={header}>Sonstige Auslagen</div>
+              <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8, tableLayout: "fixed" }}>
+                <colgroup>
+                  <col />
+                  <col />
+                  <col />
+                  <col />
+                  <col style={{ width: 110 }} />
+                </colgroup>
+                <tbody>
+                  {auslagen.map((r, i) => (
+                    <tr key={i}>
+                      <td style={textCell} colSpan={4}>{r.text || "—"}</td>
+                      <td style={amtCell}>{fmt(num(r.betrag))}</td>
                     </tr>
-                  </tbody>
-                </table>
+                  ))}
+                  <tr>
+                    <td style={{ ...textCell, fontWeight: 700 }} colSpan={4}>Zwischensumme</td>
+                    <td style={{ ...amtCell, fontWeight: 700 }}>{fmt(sumAuslagen)}</td>
+                  </tr>
+                </tbody>
+              </table>
 
-                <div style={{ textAlign: "right", marginTop: 16, fontWeight: 700, fontSize: 14 }}>
-                  Gesamte Reisekosten: {fmt(gesamt)}
-                </div>
+              <div style={{ textAlign: "right", marginTop: 16, fontWeight: 700, fontSize: 14 }}>
+                Gesamte Reisekosten: {fmt(gesamt)}
+              </div>
             </>
           );
         })()}
