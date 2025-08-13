@@ -4,15 +4,15 @@ import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
 
 /**
- * Features / Fixes:
+ * Enthält:
  * - 0,30 €/km (keine Staffel), KM aus Tachostand
- * - Responsive Layout, größere Seitenränder/Spaltengaps
- * - Upload: Bilder & PDFs, Entfernen-Button pro Beleg (Overlay), Drag&Drop
- * - PDF-Export komprimiert (JPEG) + Anhänge seitenfüllend A4
- * - pdf.js wird zuerst lokal (public/pdfjs) geladen, dann CDN-Fallback
- * - PDF enthält: Fahrtkosten, Verpflegung, Übernachtung, Sonstige Auslagen
- * - Logo erscheint nur auf der ersten Seite, rechtsbündig mit Rand; LOGO_RIGHT steuerbar
- * - Basisdaten sind Pflichtfelder (Button gesperrt + Validierung beim Export)
+ * - Pflichtfelder in Basisdaten (PDF-Button erst aktiv, wenn alles gefüllt)
+ * - Drag&Drop + Entfernen-Button für Belege (Bilder & PDFs)
+ * - PDF-Anhänge seitenfüllend A4, Bild-Kompression
+ * - pdf.js-Lader (zuerst lokal /public/pdfjs, dann CDN-Fallback)
+ * - Logo nur auf erster PDF-Seite (rechtsbündig, LOGO_RIGHT justierbar)
+ * - Einheitliche, rechtsbündige Betragsspalten in allen Tabellen
+ * - „📧 E-Mail erstellen“-Button (Light-Variante, mailto:)
  */
 
 // --------- Design Tokens ----------
@@ -77,7 +77,7 @@ const CardContent = ({ children }) => (
   <div
     style={{
       paddingInline: 32,   // gleicher Abstand links & rechts
-      paddingBlock: 24,    // oben/unten
+      paddingBlock: 24,    // Abstand oben/unten
       display: "grid",
       gap: 24,
       boxSizing: "border-box",
@@ -197,9 +197,9 @@ const JPG_QUALITY_ATTACH = 0.72;// Anhänge
 
 // Logo (liegt in /public/logo.png)
 const LOGO_SRC = "logo.png";
-const LOGO_W = 180;  // pt
-const LOGO_H = 84;   // pt
-const LOGO_RIGHT = 24; // Abstand zum rechten Seitenrand (pt). 24pt ≈ 0,85cm
+const LOGO_W = 180;     // Breite in pt
+const LOGO_H = 84;      // Höhe in pt
+const LOGO_RIGHT = 24;  // Abstand vom rechten Rand in pt (1 cm ≈ 28.35 pt)
 
 async function downscaleImage(dataUrl, targetWidthPx = TARGET_IMG_PX, quality = JPG_QUALITY_ATTACH) {
   return new Promise((resolve) => {
@@ -341,8 +341,8 @@ export default function TravelExpenseFormDE() {
   const sumAuslagen = useMemo(() => computeSumAuslagen(auslagen), [auslagen]);
   const gesamt = useMemo(() => sumFahrt + sumVerpf + sumUebernacht + sumAuslagen, [sumFahrt, sumVerpf, sumUebernacht, sumAuslagen]);
 
-  // ---------- Helpers ----------
-  const isBasisValid = Boolean(basis.name && basis.zweck && basis.beginn && basis.ende && basis.firma);
+  // Pflichtfelder-Check
+  const basisOk = Boolean(basis.name && basis.zweck && basis.beginn && basis.ende && basis.firma);
 
   // ---------- Handlers ----------
   const addAuslage = () => setAuslagen((a) => [...a, { id: Date.now(), text: "", betrag: "" }]);
@@ -427,13 +427,6 @@ export default function TravelExpenseFormDE() {
   const generatePDF = async () => {
     setErrMsg("");
     setPdfUrl("");
-
-    // Pflichtfelder prüfen
-    if (!isBasisValid) {
-      setErrMsg("Bitte füllen Sie alle Pflichtfelder in den Basisdaten aus (Name, Zweck, Beginn, Ende, Firma).");
-      return;
-    }
-
     try {
       const node = printableRef.current;
       if (!node) return;
@@ -485,9 +478,9 @@ export default function TravelExpenseFormDE() {
       const imgMain = canvas.toDataURL("image/jpeg", JPG_QUALITY_MAIN);
       pdf.addImage(imgMain, "JPEG", (pageW - w) / 2, margin, w, h, undefined, "FAST");
 
-      // Logo nur auf der ERSTEN Seite – am rechten Rand (LOGO_RIGHT)
+      // Logo nur auf der ersten Seite, rechtsbündig (LOGO_RIGHT)
       if (logoImg) {
-        const x = pageW - LOGO_RIGHT - LOGO_W; // rechtsbündig mit LOGO_RIGHT Abstand
+        const x = pageW - LOGO_RIGHT - LOGO_W;
         pdf.addImage(logoImg, "PNG", x, margin, LOGO_W, LOGO_H);
       }
 
@@ -522,7 +515,7 @@ export default function TravelExpenseFormDE() {
         }
       }
 
-      // 3) Einfügen: je Bild eine A4-Seite, Orientierung passend (KEIN Logo mehr auf Folgeseiten)
+      // 3) Einfügen: je Bild eine A4-Seite, Orientierung passend (KEIN Logo auf Folgeseiten)
       for (let i = 0; i < allImages.length; i++) {
         const { dataUrl, name } = allImages[i];
 
@@ -619,8 +612,24 @@ export default function TravelExpenseFormDE() {
         <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>Reisekostenabrechnung</h1>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           <Button variant="secondary" onClick={runTests}>🧪 Tests</Button>
-          <Button onClick={generatePDF} disabled={busy || !isBasisValid}>
+
+          <Button onClick={generatePDF} disabled={busy || !basisOk}>
             {busy ? "⏳ Erzeuge PDF…" : "⬇️ PDF erzeugen"}
+          </Button>
+
+          {/* NEW: Light-Mailto Button */}
+          <Button
+            variant="secondary"
+            onClick={() => {
+              const kw = basis.kw || "XX";
+              const mailtoLink = `mailto:rechnungswesen@tritos-consutling.com?subject=${encodeURIComponent(
+                `Reisekosten KW ${kw}`
+              )}&body=${encodeURIComponent("Bitte die PDF-Reisekostenabrechnung im Anhang einfügen.")}`;
+              window.location.href = mailtoLink;
+            }}
+            title="E-Mail mit Betreff erstellen"
+          >
+            📧 E-Mail erstellen
           </Button>
         </div>
       </div>
@@ -631,11 +640,11 @@ export default function TravelExpenseFormDE() {
         <CardContent>
           <div style={{ display: "grid", gridTemplateColumns: cols(3, 2, 1), columnGap: colGap, rowGap: 24 }}>
             <div>
-              <Label htmlFor="name">Name *</Label>
+              <Label htmlFor="name">Name*</Label>
               <Input id="name" required value={basis.name} onChange={(e) => setBasis({ ...basis, name: e.target.value })} />
             </div>
             <div>
-              <Label htmlFor="zweck">Zweck *</Label>
+              <Label htmlFor="zweck">Zweck*</Label>
               <Input id="zweck" required placeholder="z.B. Beratung Hallesche" value={basis.zweck} onChange={(e) => setBasis({ ...basis, zweck: e.target.value })} />
             </div>
             <div>
@@ -660,15 +669,15 @@ export default function TravelExpenseFormDE() {
               </div>
             </div>
             <div>
-              <Label htmlFor="beginn">Beginn *</Label>
+              <Label htmlFor="beginn">Beginn*</Label>
               <Input id="beginn" type="date" required value={basis.beginn} onChange={(e) => setBasis({ ...basis, beginn: e.target.value })} />
             </div>
             <div>
-              <Label htmlFor="ende">Ende *</Label>
+              <Label htmlFor="ende">Ende*</Label>
               <Input id="ende" type="date" required value={basis.ende} onChange={(e) => setBasis({ ...basis, ende: e.target.value })} />
             </div>
             <div>
-              <Label htmlFor="firma">Firma *</Label>
+              <Label htmlFor="firma">Firma*</Label>
               <Input id="firma" required value={basis.firma} onChange={(e) => setBasis({ ...basis, firma: e.target.value })} />
             </div>
           </div>
@@ -945,7 +954,21 @@ export default function TravelExpenseFormDE() {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
             <div style={{ fontSize: 18, fontWeight: 700 }}>{fmt(gesamt)}</div>
             <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-              <Button onClick={generatePDF} disabled={busy || !isBasisValid}>{busy ? "⏳ Erzeuge PDF…" : "⬇️ PDF erzeugen"}</Button>
+              <Button onClick={generatePDF} disabled={busy || !basisOk}>
+                {busy ? "⏳ Erzeuge PDF…" : "⬇️ PDF erzeugen"}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  const kw = basis.kw || "XX";
+                  const mailtoLink = `mailto:rechnungswesen@tritos-consutling.com?subject=${encodeURIComponent(
+                    `Reisekosten KW ${kw}`
+                  )}&body=${encodeURIComponent("Bitte die PDF-Reisekostenabrechnung im Anhang einfügen.")}`;
+                  window.location.href = mailtoLink;
+                }}
+              >
+                📧 E-Mail erstellen
+              </Button>
               {pdfUrl && (
                 <>
                   <a href={pdfUrl} target="_blank" rel="noreferrer" style={{ textDecoration: "none", fontSize: 14 }}>Vorschau öffnen</a>
@@ -972,7 +995,7 @@ export default function TravelExpenseFormDE() {
           marginTop: 24,
         }}
       >
-        {/* Kopfbereich – Logo NICHT rendern (sonst doppelt in der PDF) */}
+        {/* Kopfbereich – Logo NICHT rendern (damit es nicht doppelt im PDF landet) */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
             <div style={{ fontSize: 12 }}>{basis.firma}</div>
@@ -983,8 +1006,7 @@ export default function TravelExpenseFormDE() {
               {basis.name}
             </div>
           </div>
-          {/* Placeholder für Layout, Logo wird NUR im PDF hinzugefügt */}
-          <div style={{ width: LOGO_W * 0.5, height: LOGO_H * 0.5 }} />
+          <div style={{ width: 90, height: 28 }} />
         </div>
 
         {/* Basisdaten PDF */}
@@ -999,7 +1021,7 @@ export default function TravelExpenseFormDE() {
           </div>
         </div>
 
-        {/* Tabellen – letzte Spalte feste Breite, rechtsbündig */}
+        {/* Tabellen – 5-Spalten-Raster, letzte Spalte = Beträge (rechtsbündig, fixe Breite) */}
         {(() => {
           const cell = { border: "1px solid #000", padding: 8, fontSize: 12, verticalAlign: "top" };
           const header = { fontWeight: 700, marginTop: 16 };
@@ -1015,10 +1037,7 @@ export default function TravelExpenseFormDE() {
               <div style={header}>Fahrtkosten</div>
               <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8, tableLayout: "fixed" }}>
                 <colgroup>
-                  <col />
-                  <col />
-                  <col />
-                  <col />
+                  <col /><col /><col /><col />
                   <col style={{ width: 110 }} />
                 </colgroup>
                 <tbody>
@@ -1055,10 +1074,7 @@ export default function TravelExpenseFormDE() {
               <div style={header}>Verpflegungsmehraufwand</div>
               <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8, tableLayout: "fixed" }}>
                 <colgroup>
-                  <col />
-                  <col />
-                  <col />
-                  <col />
+                  <col /><col /><col /><col />
                   <col style={{ width: 110 }} />
                 </colgroup>
                 <tbody>
@@ -1094,10 +1110,7 @@ export default function TravelExpenseFormDE() {
               <div style={header}>Übernachtungskosten</div>
               <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8, tableLayout: "fixed" }}>
                 <colgroup>
-                  <col />
-                  <col />
-                  <col />
-                  <col />
+                  <col /><col /><col /><col />
                   <col style={{ width: 110 }} />
                 </colgroup>
                 <tbody>
@@ -1122,10 +1135,7 @@ export default function TravelExpenseFormDE() {
               <div style={header}>Sonstige Auslagen</div>
               <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8, tableLayout: "fixed" }}>
                 <colgroup>
-                  <col />
-                  <col />
-                  <col />
-                  <col />
+                  <col /><col /><col /><col />
                   <col style={{ width: 110 }} />
                 </colgroup>
                 <tbody>
