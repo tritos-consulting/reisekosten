@@ -3,12 +3,11 @@ import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
 
 /**
- * Änderungen:
- * - Mehr Abstand zwischen Feldern (gap: 20)
- * - Kompaktere Inputs (36px Höhe, 6/8px Padding)
- * - Alle bisherigen Features beibehalten:
- *   0,30 €/km (keine Staffel), KM aus Tachostand, Upload von Bildern & PDFs,
- *   komprimierter PDF-Export, Verpflegung & Übernachtungskosten.
+ * Responsive + Spacing Update:
+ * - Breakpoints: <768 (mobile), 768–1023 (tablet), ≥1024 (desktop)
+ * - Größere Seitenränder & Spaltenabstände (mehr Luft links/rechts)
+ * - Entfernen-Button bei Anhängen (Bilder & PDFs)
+ * - Kompakte Inputs (36px) beibehalten
  */
 
 // --------- Design Tokens ----------
@@ -24,6 +23,20 @@ const TOKENS = {
   primaryHover: "#0B1220",
   focus: "#2563EB",
 };
+
+// --------- Responsive Hook ----------
+function useWindowWidth() {
+  const [w, setW] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
+  useEffect(() => {
+    const onR = () => setW(window.innerWidth);
+    window.addEventListener("resize", onR);
+    return () => window.removeEventListener("resize", onR);
+  }, []);
+  return w;
+}
+const isMobile = (w) => w < 768;
+const isTablet = (w) => w >= 768 && w < 1024;
+const isDesktop = (w) => w >= 1024;
 
 // --------- Minimal UI primitives ---------
 const Card = ({ children }) => (
@@ -43,7 +56,7 @@ const Card = ({ children }) => (
 const CardHeader = ({ children }) => (
   <div
     style={{
-      padding: 16,
+      padding: 20,
       borderBottom: `1px solid ${TOKENS.border}`,
       background: "#FAFAFA",
     }}
@@ -58,7 +71,7 @@ const CardTitle = ({ children }) => (
 
 // Mehr vertikaler Abstand innerhalb jeder Card
 const CardContent = ({ children }) => (
-  <div style={{ padding: 16, display: "grid", gap: 20 }}>{children}</div>
+  <div style={{ padding: 20, display: "grid", gap: 24 }}>{children}</div>
 );
 
 const Button = ({ children, onClick, variant = "primary", style, disabled }) => {
@@ -83,6 +96,11 @@ const Button = ({ children, onClick, variant = "primary", style, disabled }) => 
       background: "#FFFFFF",
       color: TOKENS.text,
       borderColor: TOKENS.border,
+    },
+    danger: {
+      background: "#fff",
+      color: "#B91C1C",
+      borderColor: "#FCA5A5",
     },
   };
   return (
@@ -138,7 +156,7 @@ const Label = ({ children, htmlFor }) => (
       fontSize: 12,
       fontWeight: 600,
       color: TOKENS.textDim,
-      marginBottom: 8, // vorher 6
+      marginBottom: 8,
       letterSpacing: 0.2,
     }}
   >
@@ -195,6 +213,8 @@ const computeSumUebernacht = (u) => num(u.tatsaechlich) + num(u.pauschale);
 const computeSumAuslagen = (arr) => (arr || []).reduce((acc, r) => acc + num(r.betrag), 0);
 
 export default function TravelExpenseFormDE() {
+  const width = useWindowWidth();
+
   // ---------- State ----------
   const [basis, setBasis] = useState({
     name: "Kromer Tobias",
@@ -280,6 +300,8 @@ export default function TravelExpenseFormDE() {
     if (next.length) setAttachments((prev) => [...prev, ...next]);
     e.target.value = "";
   };
+  const removeAttachment = (idx) =>
+    setAttachments((prev) => prev.filter((_, i) => i !== idx));
 
   async function renderPdfFileToImages(file) {
     const pdfjsLib = await ensurePdfJs();
@@ -422,20 +444,30 @@ export default function TravelExpenseFormDE() {
     }
   };
 
+  // ---------- Responsive Grids ----------
+  // Seitenränder: größer auf Desktop
+  const containerPadding = isDesktop(width) ? 40 : isTablet(width) ? 28 : 20;
+  // Spaltengaps: größer für mehr Breite
+  const colGap = isDesktop(width) ? 28 : isTablet(width) ? 24 : 20;
+
+  // Helper: gibt repeat(...) je nach Breakpoint zurück
+  const cols = (desktop, tablet, mobile) =>
+    isDesktop(width) ? `repeat(${desktop}, minmax(0,1fr))` : isTablet(width) ? `repeat(${tablet}, minmax(0,1fr))` : `repeat(${mobile}, minmax(0,1fr))`;
+
   // ---------- Render ----------
   return (
     <div
       style={{
-        maxWidth: 980,
+        maxWidth: 1100,
         margin: "0 auto",
-        padding: 24,
+        padding: `${containerPadding}px`,
         fontFamily:
           'Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"',
         color: TOKENS.text,
         background: TOKENS.bgApp,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 20 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>Reisekostenabrechnung</h1>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           <Button variant="secondary" onClick={runTests}>🧪 Tests</Button>
@@ -447,7 +479,7 @@ export default function TravelExpenseFormDE() {
       <Card>
         <CardHeader><CardTitle>Basisdaten</CardTitle></CardHeader>
         <CardContent>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: cols(3, 2, 1), columnGap: colGap, rowGap: 24 }}>
             <div>
               <Label htmlFor="name">Name</Label>
               <Input id="name" value={basis.name} onChange={(e) => setBasis({ ...basis, name: e.target.value })} />
@@ -494,12 +526,12 @@ export default function TravelExpenseFormDE() {
       </Card>
 
       {/* Fahrtkosten */}
-      <div style={{ height: 16 }} />
+      <div style={{ height: 18 }} />
       <Card>
         <CardHeader><CardTitle>Fahrtkosten</CardTitle></CardHeader>
         <CardContent>
           {/* Zeile 1 */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0,1fr))", gap: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: cols(5, 3, 1), columnGap: colGap, rowGap: 24 }}>
             <div>
               <Label>Privat-PKW Kennzeichen</Label>
               <Input placeholder="z.B. S-AB 1234" value={fahrt.kennzeichen} onChange={(e) => setFahrt({ ...fahrt, kennzeichen: e.target.value })} />
@@ -523,7 +555,7 @@ export default function TravelExpenseFormDE() {
           </div>
 
           {/* Zeile 2 */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: cols(3, 2, 1), columnGap: colGap, rowGap: 24 }}>
             <div>
               <Label>Deutsche Bahn</Label>
               <Input inputMode="decimal" placeholder="0,00" value={fahrt.bahn} onChange={(e) => setFahrt({ ...fahrt, bahn: e.target.value })} />
@@ -545,12 +577,11 @@ export default function TravelExpenseFormDE() {
       </Card>
 
       {/* Verpflegungsmehraufwand */}
-      <div style={{ height: 16 }} />
+      <div style={{ height: 18 }} />
       <Card>
         <CardHeader><CardTitle>Verpflegungsmehraufwand</CardTitle></CardHeader>
         <CardContent>
-          {/* 1. Reihe */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: cols(2, 2, 1), columnGap: colGap, rowGap: 24 }}>
             <div>
               <Label>Tage &gt; 8 Std.</Label>
               <Input inputMode="numeric" value={verpf.tage8} onChange={(e) => setVerpf({ ...verpf, tage8: e.target.value })} />
@@ -559,9 +590,6 @@ export default function TravelExpenseFormDE() {
               <Label>Satz (€/Tag)</Label>
               <Input inputMode="decimal" value={verpf.satz8} onChange={(e) => setVerpf({ ...verpf, satz8: e.target.value })} />
             </div>
-          </div>
-          {/* 2. Reihe */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 20 }}>
             <div>
               <Label>Tage 24 Std.</Label>
               <Input inputMode="numeric" value={verpf.tage24} onChange={(e) => setVerpf({ ...verpf, tage24: e.target.value })} />
@@ -570,9 +598,6 @@ export default function TravelExpenseFormDE() {
               <Label>Satz (€/Tag)</Label>
               <Input inputMode="decimal" value={verpf.satz24} onChange={(e) => setVerpf({ ...verpf, satz24: e.target.value })} />
             </div>
-          </div>
-          {/* 3. Reihe */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 20 }}>
             <div>
               <Label>abzgl. Frühstück (Anzahl)</Label>
               <Input inputMode="numeric" value={verpf.fruehstueckAbz} onChange={(e) => setVerpf({ ...verpf, fruehstueckAbz: e.target.value })} />
@@ -590,11 +615,11 @@ export default function TravelExpenseFormDE() {
       </Card>
 
       {/* Übernachtungskosten */}
-      <div style={{ height: 16 }} />
+      <div style={{ height: 18 }} />
       <Card>
         <CardHeader><CardTitle>Übernachtungskosten</CardTitle></CardHeader>
         <CardContent>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: cols(2, 2, 1), columnGap: colGap, rowGap: 24 }}>
             <div>
               <Label>Tatsächliche Kosten (ohne Verpflegung)</Label>
               <Input inputMode="decimal" value={uebernacht.tatsaechlich} onChange={(e) => setUebernacht({ ...uebernacht, tatsaechlich: e.target.value })} />
@@ -611,7 +636,7 @@ export default function TravelExpenseFormDE() {
       </Card>
 
       {/* Sonstige Auslagen */}
-      <div style={{ height: 16 }} />
+      <div style={{ height: 18 }} />
       <Card>
         <CardHeader>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
@@ -620,14 +645,14 @@ export default function TravelExpenseFormDE() {
           </div>
         </CardHeader>
         <CardContent>
-          <div style={{ display: "grid", gap: 20 }}>
+          <div style={{ display: "grid", gap: 24 }}>
             {auslagen.map((r) => (
-              <div key={r.id} style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0,1fr))", gap: 20 }}>
-                <div style={{ gridColumn: "span 4" }}>
+              <div key={r.id} style={{ display: "grid", gridTemplateColumns: cols(6, 3, 1), columnGap: colGap, rowGap: 24 }}>
+                <div style={{ gridColumn: isDesktop(width) ? "span 4" : isTablet(width) ? "span 2" : "span 1" }}>
                   <Label>Bezeichnung</Label>
                   <Input placeholder="z.B. Smart Charge" value={r.text} onChange={(e) => setAuslagen((a) => a.map((x) => (x.id === r.id ? { ...x, text: e.target.value } : x)))} />
                 </div>
-                <div style={{ gridColumn: "span 2" }}>
+                <div style={{ gridColumn: isDesktop(width) ? "span 2" : "span 1" }}>
                   <Label>Betrag (€)</Label>
                   <Input inputMode="decimal" placeholder="0,00" value={r.betrag} onChange={(e) => setAuslagen((a) => a.map((x) => (x.id === r.id ? { ...x, betrag: e.target.value } : x)))} />
                 </div>
@@ -646,26 +671,46 @@ export default function TravelExpenseFormDE() {
       </Card>
 
       {/* Belege */}
-      <div style={{ height: 16 }} />
+      <div style={{ height: 18 }} />
       <Card>
         <CardHeader><CardTitle>Belege hochladen</CardTitle></CardHeader>
         <CardContent>
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <Input id="file" type="file" multiple accept="image/*,application/pdf" onChange={handleFileUpload} style={{ maxWidth: 420 }} />
+            <Input id="file" type="file" multiple accept="image/*,application/pdf" onChange={handleFileUpload} style={{ maxWidth: 480 }} />
             <div style={{ fontSize: 12, color: TOKENS.textMut }}>Bilder & PDFs werden komprimiert in der Export-PDF angehängt.</div>
           </div>
           {attachments.length > 0 && (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 20 }}>
+            <div style={{ display: "grid", gridTemplateColumns: cols(4, 3, 2), columnGap: colGap, rowGap: 24 }}>
               {attachments.map((att, i) => (
-                <div key={i} style={{ border: `1px solid ${TOKENS.border}`, borderRadius: TOKENS.radius, padding: 8, display: "flex", alignItems: "center", justifyContent: "center", aspectRatio: "1 / 1", overflow: "hidden" }}>
+                <div
+                  key={i}
+                  style={{
+                    border: `1px solid ${TOKENS.border}`,
+                    borderRadius: TOKENS.radius,
+                    padding: 10,
+                    display: "grid",
+                    alignItems: "center",
+                    justifyItems: "center",
+                    gridTemplateRows: "1fr auto",
+                    aspectRatio: "1 / 1",
+                    overflow: "hidden",
+                    position: "relative",
+                  }}
+                >
                   {att.kind === "image" ? (
                     <img src={att.dataUrl} alt={att.name} style={{ objectFit: "contain", width: "100%", height: "100%" }} />
                   ) : (
-                    <div style={{ textAlign: "center", fontSize: 12, color: TOKENS.textDim }}>
-                      📄 <div style={{ marginTop: 6, wordBreak: "break-word" }}>{att.name}</div>
+                    <div style={{ textAlign: "center", fontSize: 12, color: TOKENS.textDim, padding: 8 }}>
+                      📄
+                      <div style={{ marginTop: 6, wordBreak: "break-word" }}>{att.name}</div>
                       <div style={{ marginTop: 6, fontSize: 11, color: TOKENS.textMut }}>PDF wird beim Export gerendert</div>
                     </div>
                   )}
+                  <div style={{ marginTop: 8 }}>
+                    <Button variant="danger" onClick={() => removeAttachment(i)} style={{ height: 32, padding: "0 10px" }}>
+                      Entfernen
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -674,7 +719,7 @@ export default function TravelExpenseFormDE() {
       </Card>
 
       {/* Summary */}
-      <div style={{ height: 16 }} />
+      <div style={{ height: 18 }} />
       <Card>
         <CardHeader><CardTitle>Gesamtsumme</CardTitle></CardHeader>
         <CardContent>
