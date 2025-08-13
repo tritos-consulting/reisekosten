@@ -169,7 +169,7 @@ function kwIsoFromDateStr(dateStr) {
   dt.setUTCDate(dt.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1));
   const week = Math.ceil(((dt - yearStart) / 86400000 + 1) / 7);
-  const year = dt.getUTCFullYear(); // <- FIX
+  const year = dt.getUTCFullYear();
   return `${week}/${year}`;
 }
 function kmFlatCost(km, rate = 0.30) {
@@ -562,7 +562,7 @@ export default function TravelExpenseFormDE() {
       {/* Verpflegungsmehraufwand */}
       <div style={{ height: 18 }} />
       <Card>
-        <CardHeader><CardTitle>Verpflegungsmehraufwand</CardHeader></CardHeader>
+        <CardHeader><CardTitle>Verpflegungsmehraufwand</CardTitle></CardHeader>
         <CardContent>
           <div style={{ display: "grid", gridTemplateColumns: cols(2, 2, 1), columnGap: colGap, rowGap: 24 }}>
             <div>
