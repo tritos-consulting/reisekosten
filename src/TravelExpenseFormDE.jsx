@@ -444,15 +444,15 @@ export default function TravelExpenseFormDE() {
       const url = URL.createObjectURL(blob);
       setPdfUrl(url);
 
-      // Hinweis statt Fehler, falls PDFs übersprungen wurden
-      if (attachments.some((a) => a.kind === "pdf")) {
-        // Nur Hinweis zeigen, wenn überhaupt PDF-Anhänge da waren
-        try {
-          await ensurePdfJs(); // wenn das hier klappt, kein Hinweis nötig
-        } catch {
-          setErrMsg("Hinweis: PDF-Anhänge konnten nicht gerendert werden (pdf.js-Ladevorgang fehlgeschlagen). Bilder wurden dennoch exportiert.");
-        }
-      }
+// Hinweis statt Fehler – nur anzeigen, wenn beim Rendern wirklich etwas schiefging
+if (pdfRenderFailed) {
+  setErrMsg(
+    "Hinweis: Mindestens ein PDF-Anhang konnte nicht gerendert werden. Bilder wurden dennoch exportiert."
+  );
+} else {
+  // Falls vorher ein alter Hinweis stand, jetzt zurücksetzen
+  setErrMsg("");
+}
 
       setBusy(false);
     } catch (err) {
