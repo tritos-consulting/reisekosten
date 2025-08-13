@@ -12,7 +12,7 @@ import html2canvas from "html2canvas";
  * - pdf.js-Lader (zuerst lokal /public/pdfjs, dann CDN-Fallback)
  * - Logo nur auf erster PDF-Seite (rechtsbündig, LOGO_RIGHT justierbar)
  * - Einheitliche, rechtsbündige Betragsspalten in allen Tabellen
- * - „📧 E-Mail erstellen“-Button (Light-Variante, mailto:)
+ * - „📧 E-Mail “-Button (Light-Variante, mailto:)
  */
 
 // --------- Design Tokens ----------
@@ -629,7 +629,7 @@ export default function TravelExpenseFormDE() {
             }}
             title="E-Mail mit Betreff erstellen"
           >
-            📧 E-Mail erstellen
+            📧 E-Mail
           </Button>
         </div>
       </div>
@@ -967,7 +967,7 @@ export default function TravelExpenseFormDE() {
                   window.location.href = mailtoLink;
                 }}
               >
-                📧 E-Mail erstellen
+                📧 E-Mail 
               </Button>
               {pdfUrl && (
                 <>
