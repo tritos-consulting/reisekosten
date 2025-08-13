@@ -972,7 +972,7 @@ export default function TravelExpenseFormDE() {
       {testOutput.length > 0 && (
         <div style={{ marginTop: 16 }}>
           <Card>
-            <CardHeader><CardTitle>Testergebnisse</CardHeader></CardHeader>
+            <CardHeader><CardTitle>Testergebnisse</CardTitle>></CardHeader>
             <CardContent>
               <ul style={{ display: "grid", gap: 6, fontSize: 14, margin: 0, paddingLeft: 16 }}>
                 {testOutput.map((t, i) => (
