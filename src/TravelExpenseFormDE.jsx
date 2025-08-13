@@ -70,8 +70,19 @@ const CardTitle = ({ children }) => (
 );
 
 const CardContent = ({ children }) => (
-  <div style={{ padding: "24px", display: "grid", gap: 24 }}>{children}</div> // <-- mehr Innenabstand
+  <div
+    style={{
+      paddingInline: 32,   // gleicher Abstand links & rechts
+      paddingBlock: 24,    // Abstand oben/unten
+      display: "grid",
+      gap: 24,
+      boxSizing: "border-box",
+    }}
+  >
+    {children}
+  </div>
 );
+
 
 const Button = ({ children, onClick, variant = "primary", style, disabled, title, ariaLabel }) => {
   const base = {
@@ -569,7 +580,7 @@ export default function TravelExpenseFormDE() {
   };
 
   // ---------- Responsive helpers ----------
-  const containerPadding = isDesktop(width) ? 40 : isTablet(width) ? 28 : 20;
+  const containerPadding = isDesktop(width) ? 56 : isTablet(width) ? 40 : 24;
   const colGap = isDesktop(width) ? 28 : isTablet(width) ? 24 : 20;
   const cols = (desktop, tablet, mobile) =>
     isDesktop(width) ? `repeat(${desktop}, minmax(0,1fr))` : isTablet(width) ? `repeat(${tablet}, minmax(0,1fr))` : `repeat(${mobile}, minmax(0,1fr))`;
