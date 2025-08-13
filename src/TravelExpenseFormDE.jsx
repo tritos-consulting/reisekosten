@@ -622,7 +622,7 @@ export default function TravelExpenseFormDE() {
             variant="secondary"
             onClick={() => {
               const kw = basis.kw || "XX";
-              const mailtoLink = `mailto:rechnungswesen@tritos-consutling.com?subject=${encodeURIComponent(
+              const mailtoLink = `mailto:rechnungswesen@tritos-consulting.com?subject=${encodeURIComponent(
                 `Reisekosten KW ${kw}`
               )}&body=${encodeURIComponent("Bitte die PDF-Reisekostenabrechnung im Anhang einfügen.")}`;
               window.location.href = mailtoLink;
@@ -961,7 +961,7 @@ export default function TravelExpenseFormDE() {
                 variant="secondary"
                 onClick={() => {
                   const kw = basis.kw || "XX";
-                  const mailtoLink = `mailto:rechnungswesen@tritos-consutling.com?subject=${encodeURIComponent(
+                  const mailtoLink = `mailto:rechnungswesen@tritos-consulting.com?subject=${encodeURIComponent(
                     `Reisekosten KW ${kw}`
                   )}&body=${encodeURIComponent("Bitte die PDF-Reisekostenabrechnung im Anhang einfügen.")}`;
                   window.location.href = mailtoLink;
