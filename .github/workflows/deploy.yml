@@ -26,14 +26,24 @@ jobs:
         with:
           node-version: 20
 
-      # Wichtig: kein "npm ci", damit kein Lockfile nötig ist
       - name: Install dependencies
         run: npm install
 
+      - name: Debug environment
+        run: |
+          node -v
+          npm -v
+          npx vite --version
+          echo "== Files =="
+          ls -la
+          echo "== src =="
+          ls -la src || true
+          echo "== show vite.config.mjs =="
+          sed -n '1,120p' vite.config.mjs || true
+          echo "== show package.json =="
+          cat package.json
+
       - name: Build
-        env:
-          # Vite erfährt so den Repo-Namen (wird in vite.config.js genutzt)
-          GITHUB_REPOSITORY: ${{ github.repository }}
         run: npm run build
 
       - name: Upload artifact
