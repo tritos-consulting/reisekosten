@@ -384,23 +384,25 @@ export default function TravelExpenseFormDE() {
 
       // Anhänge sammeln (mit sanftem Fallback)
       const allImages = [];
-      let pdfRenderFailed = false;
+let pdfRenderFailed = false;
 
-      for (const att of attachments) {
-        if (att.kind === "image") {
-          allImages.push({ dataUrl: att.dataUrl, name: att.name });
-        } else if (att.kind === "pdf") {
-          try {
-            const imgs = await renderPdfFileToImages(att.file);
-            imgs.forEach((img, i) =>
-              allImages.push({ dataUrl: img.dataUrl, name: `${att.name} (Seite ${i + 1})` })
-            );
-          } catch {
-            // pdf.js laden/rendern fehlgeschlagen -> PDFs überspringen, aber NICHT abbrechen
-            pdfRenderFailed = true;
-          }
-        }
-      }
+// (optional) versucht pdf.js einmal vorzubereiten, ignoriert Fehler
+try { await ensurePdfJs(); } catch { /* ignorieren – wir probieren es einfach beim ersten PDF */ }
+
+for (const att of attachments) {
+  if (att.kind === "image") {
+    allImages.push({ dataUrl: att.dataUrl, name: att.name });
+  } else if (att.kind === "pdf") {
+    try {
+      const imgs = await renderPdfFileToImages(att.file);
+      imgs.forEach((img, i) =>
+        allImages.push({ dataUrl: img.dataUrl, name: `${att.name} (Seite ${i + 1})` })
+      );
+    } catch {
+      pdfRenderFailed = true;
+    }
+  }
+}
 
       if (allImages.length) {
         const title = (txt) => {
