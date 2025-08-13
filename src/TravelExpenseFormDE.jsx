@@ -177,21 +177,15 @@ function kmFlatCost(km, rate = 0.30) {
   return k * rate;
 }
 
-// --------- pdf.js Loader mit Fallbacks ---------
-const PDFJS_VERSION = "4.4.168";
+// --------- pdf.js Loader: zuerst LOKAL, dann (optional) CDNs ---------
+const PDFJS_VERSION = "3.11.174"; // entspricht deinen hochgeladenen Dateien
 const PDFJS_CANDIDATES = [
-  {
-    lib: `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.min.js`,
-    worker: `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.worker.min.js`,
-  },
-  {
-    lib: `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.min.js`,
-    worker: `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.js`,
-  },
-  {
-    lib: `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/build/pdf.min.js`,
-    worker: `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.js`,
-  },
+  // 1) Lokale Bundles (public/pdfjs/*)
+  { lib: "pdfjs/pdf.min.js", worker: "pdfjs/pdf.worker.min.js" },
+
+  // 2) Optionale Fallbacks (nur falls lokal wirklich nicht verfügbar)
+  { lib: `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/build/pdf.min.js`,
+    worker: `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.js` },
 ];
 
 function loadScript(src) {
@@ -207,7 +201,16 @@ function loadScript(src) {
 }
 
 async function ensurePdfJs() {
-  if (window.pdfjsLib) return window.pdfjsLib;
+  // Wenn pdf.js bereits durch index.html geladen wurde, direkt nutzen
+  if (window.pdfjsLib) {
+    if (!window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+      // Sicherheitshalber den lokalen Worker setzen
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = "pdfjs/pdf.worker.min.js";
+    }
+    return window.pdfjsLib;
+  }
+
+  // Sonst Kandidaten durchprobieren (lokal zuerst)
   let lastErr;
   for (const cdn of PDFJS_CANDIDATES) {
     try {
@@ -217,10 +220,10 @@ async function ensurePdfJs() {
       return window.pdfjsLib;
     } catch (e) {
       lastErr = e;
-      // try next CDN
+      // weiter mit nächstem Kandidaten
     }
   }
-  throw new Error("pdf.js konnte nicht geladen werden.");
+  throw new Error(lastErr?.message || "pdf.js konnte nicht geladen werden.");
 }
 
 // Summen
