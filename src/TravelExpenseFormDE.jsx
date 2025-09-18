@@ -5,8 +5,9 @@ import html2canvas from "html2canvas";
 
 /**
  * Änderungen:
- * + Abzug für Mittag- und Abendessen (analog Frühstück) im Formular, in Summe, und in PDF
- * + Tests erweitert
+ * - Optionaler, ausklappbarer Bereich für Abzüge (Frühstück/Mittag/Abend)
+ * - Berechnung bleibt unverändert (berücksichtigt die Abzüge, wenn Werte > 0)
+ * - Rest-Funktionalität: Upload Bilder/PDFs, Komprimierung, A4, Logo auf erster Seite, Tests, Pflichtfelder etc.
  */
 
 const TOKENS = {
@@ -198,7 +199,6 @@ async function downscaleImage(dataUrl, targetWidthPx = TARGET_IMG_PX, quality = 
 }
 
 const computeSumFahrt = (fahrt) => kmFlatCost(fahrt.km, 0.30) + num(fahrt.oev) + num(fahrt.bahn) + num(fahrt.taxi);
-// >>> UPDATED: Mittags- & Abendessen-Abzüge integriert
 const computeSumVerpf = (v) =>
   Math.max(
     0,
@@ -232,7 +232,6 @@ export default function TravelExpenseFormDE() {
     bahn: "",
     taxi: "",
   });
-  // >>> UPDATED: Verpflegung um Mittag/Abend erweitert
   const [verpf, setVerpf] = useState({
     tage8: 0,
     tage24: 0,
@@ -241,9 +240,9 @@ export default function TravelExpenseFormDE() {
     satz24: 28,
     abzFruehstueck: 5.6,
     mittagAbz: 0,
-    abzMittag: 11.2,   // 40% von 28€ als Beispiel
+    abzMittag: 11.2,  // Default-Beispiel: 40% von 28€
     abendAbz: 0,
-    abzAbend: 11.2,    // 40% von 28€ als Beispiel
+    abzAbend: 11.2,   // Default-Beispiel: 40% von 28€
   });
   const [uebernacht, setUebernacht] = useState({ tatsaechlich: "", pauschale: "" });
   const [auslagen, setAuslagen] = useState([{ id: 1, text: "", betrag: "" }]);
@@ -252,6 +251,10 @@ export default function TravelExpenseFormDE() {
   const [busy, setBusy] = useState(false);
   const [errMsg, setErrMsg] = useState("");
   const [testOutput, setTestOutput] = useState([]);
+
+  // NEW: Toggle für ausklappbare Abzüge
+  const [showDeductions, setShowDeductions] = useState(false);
+
   const [isDragging, setIsDragging] = useState(false);
   const dropRef = useRef(null);
   const printableRef = useRef(null);
@@ -309,8 +312,12 @@ export default function TravelExpenseFormDE() {
   const onDragLeave = (e) => { e.preventDefault(); e.stopPropagation(); if (dropRef.current && !dropRef.current.contains(e.relatedTarget)) setIsDragging(false); };
   const onDrop = async (e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); if (e.dataTransfer?.files?.length) await handleFiles(e.dataTransfer.files); };
 
+  async function ensurePdfJsReady() {
+    return ensurePdfJs();
+  }
+
   async function renderPdfFileToImages(file) {
-    const pdfjsLib = await ensurePdfJs();
+    const pdfjsLib = await ensurePdfJsReady();
     const ab = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
     const pages = [];
@@ -418,7 +425,7 @@ export default function TravelExpenseFormDE() {
     }
   };
 
-  // Tests inkl. neuer Abzüge
+  // Tests inkl. Abzüge
   const runTests = () => {
     const results = [];
     const pass = (name) => results.push({ name, ok: true });
@@ -427,7 +434,6 @@ export default function TravelExpenseFormDE() {
       const n1 = num("1,5"); Math.abs(n1 - 1.5) < 1e-9 ? pass("num('1,5')") : fail("num('1,5')", n1);
       const sf = computeSumFahrt({ km: 100, oev: 10, bahn: 0, taxi: 0 }); Math.abs(sf - 40) < 1e-9 ? pass("Fahrt 100km + 10€") : fail("Fahrt", sf);
       const sv = computeSumVerpf({ tage8: 2, satz8: 14, tage24: 1, satz24: 28, fruehstueckAbz: 1, abzFruehstueck: 5.6, mittagAbz: 1, abzMittag: 11.2, abendAbz: 1, abzAbend: 11.2 });
-      // 2*14 + 1*28 - 5.6 - 11.2 - 11.2 = 28.0
       Math.abs(sv - 28) < 1e-9 ? pass("Verpflegung inkl. Frühstück/Mittag/Abend Abzüge") : fail("Verpflegung-Abzüge", sv);
       const svFloor = computeSumVerpf({ tage8: 0, satz8: 14, tage24: 0, satz24: 28, fruehstueckAbz: 10, abzFruehstueck: 100, mittagAbz: 5, abzMittag: 100, abendAbz: 3, abzAbend: 100 });
       svFloor === 0 ? pass("Verpflegung nie negativ") : fail("Verpflegung nie negativ", svFloor);
@@ -506,26 +512,51 @@ export default function TravelExpenseFormDE() {
       <Card>
         <CardHeader><CardTitle>Verpflegungsmehraufwand</CardTitle></CardHeader>
         <CardContent>
+          {/* Hauptwerte */}
           <div style={{ display: "grid", gridTemplateColumns: cols(2, 2, 1), columnGap: colGap, rowGap: 24 }}>
             <div><Label>Tage &gt; 8 Std.</Label><Input inputMode="numeric" value={verpf.tage8} onChange={(e) => setVerpf({ ...verpf, tage8: e.target.value })} /></div>
             <div><Label>Satz (€/Tag)</Label><Input inputMode="decimal" value={verpf.satz8} onChange={(e) => setVerpf({ ...verpf, satz8: e.target.value })} /></div>
             <div><Label>Tage 24 Std.</Label><Input inputMode="numeric" value={verpf.tage24} onChange={(e) => setVerpf({ ...verpf, tage24: e.target.value })} /></div>
             <div><Label>Satz (€/Tag)</Label><Input inputMode="decimal" value={verpf.satz24} onChange={(e) => setVerpf({ ...verpf, satz24: e.target.value })} /></div>
-
-            {/* Frühstück */}
-            <div><Label>abzgl. Frühstück (Anzahl)</Label><Input inputMode="numeric" value={verpf.fruehstueckAbz} onChange={(e) => setVerpf({ ...verpf, fruehstueckAbz: e.target.value })} /></div>
-            <div><Label>Abzug pro Frühstück (€)</Label><Input inputMode="decimal" value={verpf.abzFruehstueck} onChange={(e) => setVerpf({ ...verpf, abzFruehstueck: e.target.value })} /></div>
-
-            {/* >>> NEW: Mittag */}
-            <div><Label>abzgl. Mittagessen (Anzahl)</Label><Input inputMode="numeric" value={verpf.mittagAbz} onChange={(e) => setVerpf({ ...verpf, mittagAbz: e.target.value })} /></div>
-            <div><Label>Abzug pro Mittagessen (€)</Label><Input inputMode="decimal" value={verpf.abzMittag} onChange={(e) => setVerpf({ ...verpf, abzMittag: e.target.value })} /></div>
-
-            {/* >>> NEW: Abend */}
-            <div><Label>abzgl. Abendessen (Anzahl)</Label><Input inputMode="numeric" value={verpf.abendAbz} onChange={(e) => setVerpf({ ...verpf, abendAbz: e.target.value })} /></div>
-            <div><Label>Abzug pro Abendessen (€)</Label><Input inputMode="decimal" value={verpf.abzAbend} onChange={(e) => setVerpf({ ...verpf, abzAbend: e.target.value })} /></div>
           </div>
 
-          <div style={{ fontSize: 12, color: TOKENS.textMut }}>
+          {/* Toggle optionaler Abzüge */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 4 }}>
+            <div style={{ fontSize: 12, color: TOKENS.textMut }}>Optional: Abzüge für Frühstück, Mittag- und Abendessen</div>
+            <Button
+              variant="secondary"
+              aria-expanded={showDeductions}
+              onClick={() => setShowDeductions((s) => !s)}
+              style={{ height: 32, padding: "0 10px" }}
+              title={showDeductions ? "Optionale Abzüge ausblenden" : "Optionale Abzüge anzeigen"}
+            >
+              {showDeductions ? "▼ Ausblenden" : "▶ Anzeigen"}
+            </Button>
+          </div>
+
+          {/* Ausklappbarer Bereich */}
+          <div
+            style={{
+              overflow: "hidden",
+              transition: "max-height .24s ease",
+              maxHeight: showDeductions ? 500 : 0,
+            }}
+            aria-hidden={!showDeductions}
+          >
+            <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: cols(2, 2, 1), columnGap: colGap, rowGap: 24 }}>
+              {/* Frühstück */}
+              <div><Label>abzgl. Frühstück (Anzahl)</Label><Input inputMode="numeric" value={verpf.fruehstueckAbz} onChange={(e) => setVerpf({ ...verpf, fruehstueckAbz: e.target.value })} /></div>
+              <div><Label>Abzug pro Frühstück (€)</Label><Input inputMode="decimal" value={verpf.abzFruehstueck} onChange={(e) => setVerpf({ ...verpf, abzFruehstueck: e.target.value })} /></div>
+              {/* Mittag */}
+              <div><Label>abzgl. Mittagessen (Anzahl)</Label><Input inputMode="numeric" value={verpf.mittagAbz} onChange={(e) => setVerpf({ ...verpf, mittagAbz: e.target.value })} /></div>
+              <div><Label>Abzug pro Mittagessen (€)</Label><Input inputMode="decimal" value={verpf.abzMittag} onChange={(e) => setVerpf({ ...verpf, abzMittag: e.target.value })} /></div>
+              {/* Abend */}
+              <div><Label>abzgl. Abendessen (Anzahl)</Label><Input inputMode="numeric" value={verpf.abendAbz} onChange={(e) => setVerpf({ ...verpf, abendAbz: e.target.value })} /></div>
+              <div><Label>Abzug pro Abendessen (€)</Label><Input inputMode="decimal" value={verpf.abzAbend} onChange={(e) => setVerpf({ ...verpf, abzAbend: e.target.value })} /></div>
+            </div>
+          </div>
+
+          <div style={{ fontSize: 12, color: TOKENS.textMut, marginTop: 8 }}>
             Zwischensumme: <span style={{ fontWeight: 600, color: TOKENS.text }}>{fmt(sumVerpf)}</span>
           </div>
         </CardContent>
@@ -552,7 +583,7 @@ export default function TravelExpenseFormDE() {
         <CardHeader>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
             <CardTitle>Sonstige Auslagen</CardTitle>
-            <Button variant="secondary" onClick={addAuslage}>+ Position</Button>
+            <Button variant="secondary" onClick={() => setAuslagen((a) => [...a, { id: Date.now(), text: "", betrag: "" }])}>+ Position</Button>
           </div>
         </CardHeader>
         <CardContent>
@@ -592,15 +623,15 @@ export default function TravelExpenseFormDE() {
           </div>
           <div
             ref={dropRef}
-            onDragOver={onDragOver}
-            onDragLeave={onDragLeave}
-            onDrop={onDrop}
+            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
+            onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); if (dropRef.current && !dropRef.current.contains(e.relatedTarget)) setIsDragging(false); }}
+            onDrop={async (e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); if (e.dataTransfer?.files?.length) await handleFiles(e.dataTransfer.files); }}
             style={{ marginTop: 8, border: `2px dashed ${isDragging ? TOKENS.focus : TOKENS.border}`, background: isDragging ? "rgba(37,99,235,0.06)" : "#fff", borderRadius: TOKENS.radius, padding: 24, textAlign: "center", color: TOKENS.textDim, transition: "all .15s ease" }}
           >
             {isDragging ? "Dateien hierher loslassen…" : "…oder Dateien hierher ziehen und ablegen (Bilder, PDFs)"}
           </div>
           {attachments.length > 0 && (
-            <div style={{ display: "grid", gridTemplateColumns: cols(4, 3, 2), columnGap: colGap, rowGap: 24 }}>
+            <div style={{ display: "grid", gridTemplateColumns: isDesktop(width) ? "repeat(4,1fr)" : isTablet(width) ? "repeat(3,1fr)" : "repeat(2,1fr)", columnGap: colGap, rowGap: 24 }}>
               {attachments.map((att, i) => (
                 <div key={i} style={{ border: `1px solid ${TOKENS.border}`, borderRadius: TOKENS.radius, padding: 10, display: "grid", alignItems: "center", justifyItems: "center", gridTemplateRows: "1fr", aspectRatio: "1 / 1", overflow: "hidden", position: "relative", background: "#fff" }}>
                   <Button variant="ghost" onClick={() => removeAttachment(i)} title="Beleg entfernen" ariaLabel={`Anhang ${att.name} entfernen`} style={{ position: "absolute", top: 8, right: 8, height: 30, padding: "0 10px", borderRadius: 10, backdropFilter: "blur(2px)" }}>Entfernen ✕</Button>
@@ -718,7 +749,7 @@ export default function TravelExpenseFormDE() {
                     <td style={amtCell}>{fmt(num(verpf.tage24) * num(verpf.satz24))}</td>
                   </tr>
 
-                  {/* Abzüge */}
+                  {/* Abzüge (werden angezeigt, auch wenn Wert 0 ist – kann auf Wunsch dynamisch ausgeblendet werden) */}
                   <tr>
                     <td style={textCell}>abzgl. Frühstück</td>
                     <td style={textCell}>{verpf.fruehstueckAbz}</td>
