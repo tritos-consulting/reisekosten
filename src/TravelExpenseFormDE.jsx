@@ -215,7 +215,7 @@ export default function TravelExpenseFormDE() {
   const width = useWindowWidth();
 
   const [basis, setBasis] = useState({
-    name: "Kromer Tobias",
+    name: "",
     zweck: "",
     beginn: "",
     ende: "",
