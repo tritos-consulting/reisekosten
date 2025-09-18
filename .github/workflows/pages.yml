@@ -25,7 +25,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
+          
 
       # NUTZE "npm install" (robuster, falls kein package-lock.json vorhanden ist)
       - name: Install deps
